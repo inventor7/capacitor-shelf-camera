@@ -1,23 +1,200 @@
 package com.efficy.shelfcamera
 
+import android.Manifest
+import android.util.Size
+import com.efficy.shelfcamera.sensors.TiltSensor
+import com.efficy.shelfcamera.util.DeviceTier
+import com.efficy.shelfcamera.util.EventEmitter
+import com.efficy.shelfcamera.util.ThermalMonitor
 import com.getcapacitor.JSObject
-import com.getcapacitor.Plugin
+import com.getcapacitor.PermissionState
 import com.getcapacitor.PluginCall
-import com.getcapacitor.annotation.CapacitorPlugin
 import com.getcapacitor.PluginMethod
+import com.getcapacitor.annotation.CapacitorPlugin
+import com.getcapacitor.annotation.Permission
+import com.getcapacitor.annotation.PermissionCallback
+import org.opencv.android.OpenCVLoader
 
-@CapacitorPlugin(name = "ShelfCamera")
-class ShelfCameraPlugin : Plugin() {
+@CapacitorPlugin(
+    name = "ShelfCamera",
+    permissions = [
+        Permission(
+            strings = [Manifest.permission.CAMERA],
+            alias = "camera",
+        )
+    ]
+)
+class ShelfCameraPlugin : com.getcapacitor.Plugin() {
 
-    private val implementation = ShelfCamera()
+    private var cameraController: CameraController? = null
+    private var activeSession: PanoramaSession? = null
+    private var tiltSensor: TiltSensor? = null
+    private var thermalMonitor: ThermalMonitor? = null
+    private var openCvReady = false
+
+    override fun load() {
+        super.load()
+        openCvReady = OpenCVLoader.initLocal()
+    }
 
     @PluginMethod
-    fun echo(call: PluginCall) {
-        val value = call.getString("value") ?: ""
-
-        val ret = JSObject().apply {
-            put("value", implementation.echo(value))
+    fun start(call: PluginCall) {
+        if (!openCvReady) {
+            call.reject("DEVICE_UNSUPPORTED", "OpenCV initialization failed")
+            return
         }
-        call.resolve(ret)
+        if (getPermissionState("camera") != PermissionState.GRANTED) {
+            requestPermissionForAlias("camera", call, "cameraPermCallback")
+            return
+        }
+        doStart(call)
+    }
+
+    @PermissionCallback
+    private fun cameraPermCallback(call: PluginCall) {
+        if (getPermissionState("camera") == PermissionState.GRANTED) {
+            doStart(call)
+        } else {
+            notifyListeners("error", JSObject().apply {
+                put("code", "PERMISSION_DENIED")
+                put("message", "Camera permission denied")
+            })
+            call.reject("PERMISSION_DENIED")
+        }
+    }
+
+    private fun doStart(call: PluginCall) {
+        val resolution = call.getString("resolution", "1080p") ?: "1080p"
+        val size = when (resolution) {
+            "720p" -> Size(1280, 720)
+            "2k"   -> Size(2560, 1440)
+            else   -> Size(1920, 1080)
+        }
+
+        val sensor = TiltSensor(context).also { it.start() }
+        tiltSensor = sensor
+
+        val emitter = EventEmitter(this)
+
+        val monitor = ThermalMonitor(context) { throttled ->
+            cameraController?.setThrottled(throttled)
+            emitter.emit("thermalThrottle", JSObject().apply {
+                put("throttled", throttled)
+            })
+        }
+        monitor.start()
+        thermalMonitor = monitor
+
+        val controller = CameraController(context, activity, emitter, sensor)
+        cameraController = controller
+        controller.start(size, call)
+    }
+
+    @PluginMethod
+    fun stop(call: PluginCall) {
+        thermalMonitor?.stop()
+        thermalMonitor = null
+        tiltSensor?.stop()
+        tiltSensor = null
+        cameraController?.stop()
+        cameraController = null
+        activeSession = null
+        call.resolve()
+    }
+
+    @PluginMethod
+    fun setPreviewVisible(call: PluginCall) {
+        val visible = call.getBoolean("visible", true) ?: true
+        cameraController?.setPreviewVisible(visible)
+        call.resolve()
+    }
+
+    @PluginMethod
+    fun beginPanorama(call: PluginCall) {
+        val sessionId = call.getString("sessionId") ?: run {
+            call.reject("sessionId is required")
+            return
+        }
+        val mode = call.getString("mode", "sweep") ?: "sweep"
+        val thresholds = call.getObject("keyframeThresholds")
+
+        val session = PanoramaSession(
+            sessionId = sessionId,
+            mode = mode,
+            thresholdsJson = thresholds,
+            plugin = this,
+            context = context,
+        )
+        activeSession = session
+        cameraController?.setActiveSession(session)
+        call.resolve()
+    }
+
+    @PluginMethod
+    fun capturePhoto(call: PluginCall) {
+        call.getString("sessionId") ?: run {
+            call.reject("sessionId is required")
+            return
+        }
+        val targetCell = call.getObject("targetCell")
+        val session = activeSession ?: run {
+            call.reject("No active panorama session")
+            return
+        }
+        cameraController?.captureStill(session, targetCell, call)
+    }
+
+    @PluginMethod
+    fun commitPanorama(call: PluginCall) {
+        val sessionId = call.getString("sessionId") ?: run {
+            call.reject("sessionId is required")
+            return
+        }
+        val session = activeSession?.takeIf { it.sessionId == sessionId } ?: run {
+            call.reject("No active session: $sessionId")
+            return
+        }
+        session.commit(call) { event ->
+            notifyListeners("panoramaReady", event)
+        }
+    }
+
+    @PluginMethod
+    fun cancelPanorama(call: PluginCall) {
+        val sessionId = call.getString("sessionId") ?: run {
+            call.reject("sessionId is required")
+            return
+        }
+        val session = activeSession?.takeIf { it.sessionId == sessionId }
+        if (session != null) {
+            session.cancel()
+            notifyListeners("error", JSObject().apply {
+                put("code", "ABORTED")
+                put("message", "Panorama session $sessionId was cancelled")
+            })
+        }
+        activeSession = null
+        cameraController?.setActiveSession(null)
+        call.resolve()
+    }
+
+    @PluginMethod
+    fun getDeviceTier(call: PluginCall) {
+        val tier = DeviceTier.detect(context)
+        call.resolve(JSObject().put("tier", tier.name.lowercase()))
+    }
+
+    override fun handleOnDestroy() {
+        super.handleOnDestroy()
+        thermalMonitor?.stop()
+        tiltSensor?.stop()
+        activeSession?.let {
+            it.cancel()
+            notifyListeners("error", JSObject().apply {
+                put("code", "ABORTED")
+                put("message", "Plugin destroyed while session ${it.sessionId} was active")
+            })
+        }
+        cameraController?.stop()
     }
 }

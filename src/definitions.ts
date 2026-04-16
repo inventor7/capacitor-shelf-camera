@@ -1,3 +1,114 @@
+import type { PluginListenerHandle } from '@capacitor/core';
+
+export type CoachingSignals = {
+  blurScore: number;
+  motionMagnitude: number;
+  tiltDeg: number;
+  overlapPct: number;
+  lumaMean: number;
+  fps: number;
+  timestamp: number;
+};
+
+export type KeyframeCell = { row: number; col: number };
+
+export type KeyframeAcceptedEvent = {
+  frameId: string;
+  thumbnailUri: string;
+  fullUri: string;
+  gridCell: KeyframeCell;
+  qualityScore: number;
+  signals: CoachingSignals;
+};
+
+export type StitchProgressEvent = {
+  sessionId: string;
+  completedCells: number;
+  totalCells: number;
+  previewUri: string | null;
+  seamScore: number;
+};
+
+export type PanoramaReadyEvent = {
+  sessionId: string;
+  uri: string;
+  width: number;
+  height: number;
+  gridRows: number;
+  gridCols: number;
+  durationMs: number;
+  seamScore: number;
+};
+
+export type ShelfCameraError = {
+  code:
+    | 'PERMISSION_DENIED'
+    | 'DEVICE_UNSUPPORTED'
+    | 'STITCH_FAILED'
+    | 'IO_ERROR'
+    | 'ABORTED';
+  message: string;
+};
+
 export interface ShelfCameraPlugin {
-  echo(options: { value: string }): Promise<{ value: string }>;
+  start(options: {
+    resolution?: '720p' | '1080p' | '2k';
+    coaching?: boolean;
+    /** Emits full frame signals at 30fps when true. */
+    diagnostic?: boolean;
+  }): Promise<void>;
+
+  stop(): Promise<void>;
+
+  setPreviewVisible(opts: { visible: boolean }): Promise<void>;
+
+  beginPanorama(opts: {
+    sessionId: string;
+    mode: 'sweep' | 'singleShot';
+    expectedCells?: number;
+    keyframeThresholds?: {
+      minBlur?: number;
+      maxMotion?: number;
+      maxTiltDeg?: number;
+      minOverlapPct?: number;
+    };
+  }): Promise<void>;
+
+  capturePhoto(opts: {
+    sessionId: string;
+    targetCell?: KeyframeCell;
+  }): Promise<{ frameId: string; fullUri: string; thumbnailUri: string }>;
+
+  commitPanorama(opts: { sessionId: string }): Promise<PanoramaReadyEvent>;
+
+  cancelPanorama(opts: { sessionId: string }): Promise<void>;
+
+  getDeviceTier(): Promise<{ tier: 'low' | 'mid' | 'high' }>;
+
+  addListener(
+    eventName: 'frame',
+    handler: (s: CoachingSignals) => void,
+  ): Promise<PluginListenerHandle>;
+
+  addListener(
+    eventName: 'keyframeAccepted',
+    handler: (e: KeyframeAcceptedEvent) => void,
+  ): Promise<PluginListenerHandle>;
+
+  addListener(
+    eventName: 'stitchProgress',
+    handler: (e: StitchProgressEvent) => void,
+  ): Promise<PluginListenerHandle>;
+
+  addListener(
+    eventName: 'panoramaReady',
+    handler: (e: PanoramaReadyEvent) => void,
+  ): Promise<PluginListenerHandle>;
+
+  addListener(
+    eventName: 'error',
+    handler: (e: ShelfCameraError) => void,
+  ): Promise<PluginListenerHandle>;
+
+  removeAllListeners(): Promise<void>;
 }

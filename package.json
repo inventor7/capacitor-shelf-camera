@@ -1,6 +1,6 @@
 {
   "name": "capacitor-shelf-camera",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "Coached panoramic shelf capture plugin with CameraX, OpenCV stitching, and per-frame coaching signals",
   "main": "dist/plugin.cjs.js",
   "module": "dist/esm/index.js",
@@ -27,7 +27,12 @@
   "keywords": [
     "capacitor",
     "plugin",
-    "native"
+    "native",
+    "camera",
+    "shelf",
+    "panorama",
+    "opencv",
+    "android"
   ],
   "scripts": {
     "verify": "npm run verify:ios && npm run verify:android && npm run verify:web",
@@ -43,6 +48,7 @@
     "build": "npm run clean && npm run docgen && tsc && rollup -c rollup.config.mjs",
     "clean": "rimraf ./dist",
     "watch": "tsc --watch",
+    "test": "vitest run",
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {
@@ -53,16 +59,18 @@
     "@ionic/eslint-config": "^0.4.0",
     "@ionic/prettier-config": "^4.0.0",
     "@ionic/swiftlint-config": "^2.0.0",
+    "@vitest/coverage-v8": "^4.1.4",
     "eslint": "^8.57.1",
     "prettier": "^3.6.2",
     "prettier-plugin-java": "^2.7.7",
     "rimraf": "^6.1.0",
     "rollup": "^4.53.2",
     "swiftlint": "^2.0.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.4"
   },
   "peerDependencies": {
-    "@capacitor/core": ">=8.0.0"
+    "@capacitor/core": ">=7.0.0 <9.0.0"
   },
   "prettier": "@ionic/prettier-config",
   "swiftlint": "@ionic/swiftlint-config",
