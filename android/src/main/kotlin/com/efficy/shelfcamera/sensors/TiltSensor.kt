@@ -34,13 +34,17 @@ class TiltSensor(context: Context) : SensorEventListener {
         val rotationMatrix = FloatArray(9)
         SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
 
-        // Device-up vector in world frame = third column of rotation matrix
-        val deviceUpX = rotationMatrix[2]
-        val deviceUpY = rotationMatrix[5]
-        val deviceUpZ = rotationMatrix[8]
-
-        // Dot product with world up (0, 1, 0)
-        val dot = deviceUpY.coerceIn(-1f, 1f)
+        // Android's rotation matrix maps device → world, where world axes are
+        // (East, North, Sky). "World up" is the Z axis = (0, 0, 1).
+        //
+        // For an upright phone held in portrait orientation, the device Y axis
+        // (screen-up) should point toward the sky. So "tilt from upright" is the
+        // angle between device-Y (in world frame) and world-Z.
+        //
+        // Device Y expressed in world frame = 2nd column of R = (R[0,1], R[1,1], R[2,1])
+        //                                                     = (rotationMatrix[1,4,7])
+        // Dot with (0,0,1) = rotationMatrix[7].
+        val dot = rotationMatrix[7].coerceIn(-1f, 1f)
         currentTiltDeg = Math.toDegrees(acos(dot.toDouble())).toFloat()
     }
 
