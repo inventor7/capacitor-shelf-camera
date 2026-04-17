@@ -6,81 +6,101 @@ import org.opencv.features2d.BFMatcher
 import org.opencv.features2d.ORB
 
 /**
- * Computes % overlap between current frame and last accepted keyframe
+ * Computes % overlap between the current frame and the last accepted keyframe
  * using ORB feature matching + RANSAC homography inlier ratio.
- * Only invoked every 3rd frame (~10 Hz) to spare CPU.
+ *
+ * Runs every 3rd call to spare CPU (~3.3 Hz when frames arrive at 10 Hz).
+ *
+ * Mat lifecycle: all OpenCV Mats allocated in [analyze] are released in the
+ * `finally` block. Reference Mats held across calls are replaced/released in
+ * [updateReference].
  */
 class OverlapAnalyzer {
 
     private val orb     = ORB.create(500)
     private val matcher = BFMatcher.create(Core.NORM_HAMMING, true)
-    private var prevKeyframeMat: Mat? = null
+
+    private var prevKeyframeMat:  Mat? = null
     private var prevKeyframeDesc: Mat? = null
-    private var prevKeyframeKps: MatOfKeyPoint? = null
+    private var prevKeyframeKps:  MatOfKeyPoint? = null
     private var frameCounter = 0
+    private var prevOverlapPct = 0f
 
     /**
-     * @param lumaMat current grayscale frame
-     * @return overlap percentage [0..100]; -1 if no reference frame yet
+     * @param lumaMat current grayscale frame (CV_8UC1)
+     * @return overlap percentage [0..100]; 0 if no reference yet or too few matches.
      */
     fun analyze(lumaMat: Mat): Float {
         frameCounter++
         if (frameCounter % 3 != 0) return prevOverlapPct
 
-        val kps  = MatOfKeyPoint()
+        // Fast-path: nothing to compare against — skip ORB entirely.
+        val refDesc = prevKeyframeDesc ?: return 0f
+        val refKps  = prevKeyframeKps ?: return 0f
+        if (refDesc.empty()) return 0f
+
+        val kps = MatOfKeyPoint()
         val desc = Mat()
-        orb.detectAndCompute(lumaMat, Mat(), kps, desc)
-
-        val ref     = prevKeyframeMat
-        val refDesc = prevKeyframeDesc
-        val refKps  = prevKeyframeKps
-
-        if (ref == null || refDesc == null || refKps == null || desc.empty() || refDesc.empty()) {
-            return 0f
-        }
-
-        val matchesList = MatOfDMatch()
-        matcher.match(refDesc, desc, matchesList)
-
-        val matches = matchesList.toList()
-        if (matches.size < 8) return 0f
-
-        val srcPts = MatOfPoint2f(*matches.map { m ->
-            refKps.toList()[m.queryIdx].pt
-        }.toTypedArray())
-        val dstPts = MatOfPoint2f(*matches.map { m ->
-            kps.toList()[m.trainIdx].pt
-        }.toTypedArray())
-
         val mask = Mat()
-        Calib3d.findHomography(srcPts, dstPts, Calib3d.RANSAC, 3.0, mask)
+        val matchesList = MatOfDMatch()
+        var srcPts: MatOfPoint2f? = null
+        var dstPts: MatOfPoint2f? = null
 
-        val inliers = (0 until mask.rows()).count { mask.get(it, 0)[0] != 0.0 }
-        prevOverlapPct = (inliers.toFloat() / matches.size * 100f).coerceIn(0f, 100f)
-        return prevOverlapPct
+        return try {
+            orb.detectAndCompute(lumaMat, Mat(), kps, desc)
+            if (desc.empty()) return 0f
+
+            matcher.match(refDesc, desc, matchesList)
+            val matches = matchesList.toList()
+            if (matches.size < 8) return 0f
+
+            val refKpList = refKps.toList()
+            val curKpList = kps.toList()
+
+            srcPts = MatOfPoint2f(*matches.map { refKpList[it.queryIdx].pt }.toTypedArray())
+            dstPts = MatOfPoint2f(*matches.map { curKpList[it.trainIdx].pt }.toTypedArray())
+
+            Calib3d.findHomography(srcPts, dstPts, Calib3d.RANSAC, 3.0, mask)
+            if (mask.empty()) return 0f
+
+            val inliers = (0 until mask.rows()).count { mask.get(it, 0)[0] != 0.0 }
+            prevOverlapPct = (inliers.toFloat() / matches.size * 100f).coerceIn(0f, 100f)
+            prevOverlapPct
+        } catch (e: Exception) {
+            // Overlap failure is non-fatal — just return the last known value.
+            0f
+        } finally {
+            kps.release()
+            desc.release()
+            mask.release()
+            matchesList.release()
+            srcPts?.release()
+            dstPts?.release()
+        }
     }
 
-    /** Call when a keyframe is accepted to update the reference, or null to reset. */
+    /**
+     * Called when a keyframe is accepted — updates the reference frame.
+     * Pass `null` to reset (e.g. at the start of a new session).
+     */
     fun updateReference(keyframeMat: Mat?) {
         prevKeyframeMat?.release()
         prevKeyframeDesc?.release()
-        prevKeyframeKps = null
-        prevOverlapPct = 0f
+        prevKeyframeKps?.release()
+        prevKeyframeMat  = null
+        prevKeyframeDesc = null
+        prevKeyframeKps  = null
+        prevOverlapPct   = 0f
 
-        if (keyframeMat == null) {
-            prevKeyframeMat = null
-            prevKeyframeDesc = null
-            return
-        }
+        if (keyframeMat == null) return
 
-        prevKeyframeMat = keyframeMat.clone()
-
-        val kps  = MatOfKeyPoint()
+        val clone = keyframeMat.clone()
+        val kps = MatOfKeyPoint()
         val desc = Mat()
-        orb.detectAndCompute(prevKeyframeMat, Mat(), kps, desc)
-        prevKeyframeDesc = desc
-        prevKeyframeKps  = kps
-    }
+        orb.detectAndCompute(clone, Mat(), kps, desc)
 
-    private var prevOverlapPct = 0f
+        prevKeyframeMat  = clone
+        prevKeyframeKps  = kps
+        prevKeyframeDesc = desc
+    }
 }
