@@ -1,0 +1,4 @@
+@import 'tailwindcss';
+/* import Konsta UI theme */
+@import 'konsta/vue/theme.css';
+@import './prism-tokens.scss';

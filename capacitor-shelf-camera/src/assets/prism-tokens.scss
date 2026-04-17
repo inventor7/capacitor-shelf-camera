@@ -1,0 +1,91 @@
+/* ─── Prism Design System ─── */
+/* Scoped via data-ir-v2 on the app root */
+
+:root[data-ir-v2="true"] {
+  /* Base surfaces — AMOLED, near-black */
+  --bg-0: #05060a;
+  --bg-1: #0b0d15;
+  --bg-surface: rgba(255, 255, 255, 0.04);
+  --border-glass: rgba(255, 255, 255, 0.08);
+  --backdrop: rgba(0, 0, 0, 0.60);
+
+  /* Text */
+  --text-0: #f4f6fb;
+  --text-1: rgba(244, 246, 251, 0.72);
+  --text-2: rgba(244, 246, 251, 0.48);
+
+  /* Prism accents (iridescent) */
+  --prism-1: #7aa8ff;
+  --prism-2: #b593ff;
+  --prism-3: #ff8ad1;
+  --prism-4: #ffb26b;
+  --prism-5: #7ef0c6;
+
+  --prism-gradient: linear-gradient(120deg,
+    var(--prism-1) 0%, var(--prism-2) 25%, var(--prism-3) 50%,
+    var(--prism-4) 75%, var(--prism-5) 100%);
+
+  --prism-conic: conic-gradient(from 0deg,
+    #7aa8ff, #b593ff, #ff8ad1, #ffb26b, #7ef0c6, #7aa8ff);
+
+  /* Status */
+  --ok: #7ef0c6;
+  --warn: #ffb26b;
+  --block: #ff6b8a;
+
+  /* Motion Timing */
+  --t-micro: 120ms;
+  --t-short: 200ms;
+  --t-medium: 400ms;
+  --t-long: 680ms;
+  --t-hero: 880ms;
+  --t-ceremony: 1200ms;
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ─── Glass Surface Mixin (applied via class) ─── */
+.glass-surface {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-glass);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+
+/* ─── Camera-active transparency ─── */
+html.camera-active,
+body.camera-active,
+body.camera-active > #app,
+body.camera-active .k-app {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* ─── Prism Edge Animations ─── */
+@keyframes prism-sweep {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes prism-pulse {
+  0%, 100% { opacity: 0.6; }
+  50%      { opacity: 1; }
+}
+
+@keyframes breathing {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.04); }
+}
+
+@keyframes fade-up-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}

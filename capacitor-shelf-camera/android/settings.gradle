@@ -1,0 +1,12 @@
+include ':app'
+include ':capacitor-cordova-android-plugins'
+project(':capacitor-cordova-android-plugins').projectDir = new File('./capacitor-cordova-android-plugins/')
+
+// OpenCV 4.12.0 full Android SDK module – required by capacitor-shelf-camera.
+// Download the OpenCV Android SDK from https://opencv.org/releases/ and place
+// the extracted "sdk" folder at android/opencv (relative to the plugin root).
+// The actual path used here resolves through the pnpm symlink to the plugin's android dir.
+include ':opencv'
+project(':opencv').projectDir = new File('../node_modules/.pnpm/capacitor-shelf-camera@file+.._@capacitor+core@8.3.1/node_modules/capacitor-shelf-camera/android/opencv')
+
+apply from: 'capacitor.settings.gradle'
