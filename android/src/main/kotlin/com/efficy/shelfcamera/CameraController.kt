@@ -1,32 +1,35 @@
 package com.efficy.shelfcamera
 
 import android.content.Context
+import android.graphics.Color
 import android.util.Size
+import android.view.ViewGroup
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.efficy.shelfcamera.analyzers.FrameAnalyzer
 import com.efficy.shelfcamera.keyframe.KeyframeStore
 import com.efficy.shelfcamera.sensors.TiltSensor
 import com.efficy.shelfcamera.util.EventEmitter
-import com.efficy.shelfcamera.util.toYuvMat
+import com.getcapacitor.Bridge
 import com.getcapacitor.JSObject
 import com.getcapacitor.PluginCall
+import java.util.concurrent.Executors
 import org.opencv.core.Mat
 import org.opencv.imgproc.Imgproc
-import java.util.UUID
-import java.util.concurrent.Executors
 
 /**
- * Owns the CameraX lifecycle: binds Preview + ImageAnalysis + ImageCapture use-cases
- * and routes frames to [FrameAnalyzer] for per-frame coaching signals.
+ * Owns the CameraX lifecycle: binds Preview + ImageAnalysis + ImageCapture use-cases and routes
+ * frames to [FrameAnalyzer] for per-frame coaching signals.
  */
 class CameraController(
-    private val context: Context,
-    private val activity: FragmentActivity,
-    private val emitter: EventEmitter,
-    private val tiltSensor: TiltSensor,
+        private val context: Context,
+        private val activity: FragmentActivity,
+        private val emitter: EventEmitter,
+        private val tiltSensor: TiltSensor,
+        private val bridge: Bridge,
 ) {
     private val analyzerExecutor = Executors.newSingleThreadExecutor()
     private val stitchExecutor = Executors.newSingleThreadExecutor()
@@ -34,61 +37,96 @@ class CameraController(
     private var analysisUseCase: ImageAnalysis? = null
     private var imageCapture: ImageCapture? = null
     private var provider: ProcessCameraProvider? = null
-    private var currentSurfaceProvider: Preview.SurfaceProvider? = null
+    private var previewView: PreviewView? = null
     private var frameAnalyzer: FrameAnalyzer? = null
     private val keyframeStore = KeyframeStore(context)
 
     fun start(resolution: Size, call: PluginCall) {
-        val future = ProcessCameraProvider.getInstance(context)
-        future.addListener({
-            try {
-                provider = future.get()
+        activity.runOnUiThread {
+            bridge.webView.setBackgroundColor(Color.TRANSPARENT)
+            val parent = bridge.webView.parent as? ViewGroup
 
-                previewUseCase = Preview.Builder()
-                    .setTargetResolution(resolution)
-                    .build()
-                    .also {
-                        currentSurfaceProvider?.let { sp -> it.setSurfaceProvider(sp) }
+            previewView =
+                    PreviewView(context).apply {
+                        layoutParams =
+                                ViewGroup.LayoutParams(
+                                        ViewGroup.LayoutParams.MATCH_PARENT,
+                                        ViewGroup.LayoutParams.MATCH_PARENT
+                                )
                     }
+            parent?.addView(previewView, 0) // add underneath WebView
 
-                val analyzer = FrameAnalyzer(emitter, keyframeStore, stitchExecutor)
-                analyzer.setTiltSensor(tiltSensor)
-                frameAnalyzer = analyzer
+            val future = ProcessCameraProvider.getInstance(context)
+            future.addListener(
+                    {
+                        try {
+                            provider = future.get()
 
-                analysisUseCase = ImageAnalysis.Builder()
-                    .setTargetResolution(resolution)
-                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                    .build()
-                    .also { it.setAnalyzer(analyzerExecutor, analyzer) }
+                            previewUseCase =
+                                    Preview.Builder().setTargetResolution(resolution).build().also {
+                                        it.setSurfaceProvider(previewView!!.surfaceProvider)
+                                    }
 
-                imageCapture = ImageCapture.Builder()
-                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                    .build()
+                            val analyzer = FrameAnalyzer(emitter, keyframeStore, stitchExecutor)
+                            analyzer.setTiltSensor(tiltSensor)
+                            frameAnalyzer = analyzer
 
-                provider?.unbindAll()
-                provider?.bindToLifecycle(
-                    activity,
-                    CameraSelector.DEFAULT_BACK_CAMERA,
-                    previewUseCase, analysisUseCase, imageCapture,
-                )
+                            analysisUseCase =
+                                    ImageAnalysis.Builder()
+                                            .setTargetResolution(resolution)
+                                            .setBackpressureStrategy(
+                                                    ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST
+                                            )
+                                            .build()
+                                            .also { it.setAnalyzer(analyzerExecutor, analyzer) }
 
-                call.resolve()
-            } catch (e: Exception) {
-                call.reject("Camera start failed: ${e.message}")
-            }
-        }, ContextCompat.getMainExecutor(context))
+                            imageCapture =
+                                    ImageCapture.Builder()
+                                            .setCaptureMode(
+                                                    ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
+                                            )
+                                            .build()
+
+                            provider?.unbindAll()
+                            provider?.bindToLifecycle(
+                                    activity,
+                                    CameraSelector.DEFAULT_BACK_CAMERA,
+                                    previewUseCase,
+                                    analysisUseCase,
+                                    imageCapture,
+                            )
+
+                            call.resolve()
+                        } catch (e: Exception) {
+                            call.reject("Camera start failed: ${e.message}")
+                        }
+                    },
+                    ContextCompat.getMainExecutor(context)
+            )
+        } // close runOnUiThread
     }
 
     fun stop() {
-        provider?.unbindAll()
-        previewUseCase = null
-        analysisUseCase = null
-        imageCapture = null
-        frameAnalyzer = null
+        activity.runOnUiThread {
+            provider?.unbindAll()
+
+            val parent = bridge.webView.parent as? ViewGroup
+            previewView?.let { parent?.removeView(it) }
+            previewView = null
+
+            bridge.webView.setBackgroundColor(Color.WHITE)
+
+            previewUseCase = null
+            analysisUseCase = null
+            imageCapture = null
+            frameAnalyzer = null
+        }
     }
 
     fun setPreviewVisible(visible: Boolean) {
-        previewUseCase?.setSurfaceProvider(if (visible) currentSurfaceProvider else null)
+        activity.runOnUiThread {
+            previewUseCase?.setSurfaceProvider(if (visible) previewView?.surfaceProvider else null)
+        }
     }
 
     fun setActiveSession(session: PanoramaSession?) {
@@ -100,48 +138,50 @@ class CameraController(
     }
 
     /**
-     * Capture a full-resolution still for a repair frame or manual keyframe.
-     * Converts YUV → BGR Mat, saves via [KeyframeStore], and resolves call with URIs.
+     * Capture a full-resolution still for a repair frame or manual keyframe. Converts YUV → BGR
+     * Mat, saves via [KeyframeStore], and resolves call with URIs.
      */
     fun captureStill(session: PanoramaSession, targetCell: JSObject?, call: PluginCall) {
-        val capture = imageCapture ?: run {
-            call.reject("Camera not started")
-            return
-        }
-        capture.takePicture(
-            ContextCompat.getMainExecutor(context),
-            object : ImageCapture.OnImageCapturedCallback() {
-                override fun onCaptureSuccess(image: ImageProxy) {
-                    try {
-                        val lumaMat = image.toYuvMat()
-                        image.close()
-                        if (lumaMat == null) {
-                            call.reject("IO_ERROR", "Failed to convert captured image")
+        val capture =
+                imageCapture
+                        ?: run {
+                            call.reject("Camera not started")
                             return
                         }
+        capture.takePicture(
+                ContextCompat.getMainExecutor(context),
+                object : ImageCapture.OnImageCapturedCallback() {
+                    override fun onCaptureSuccess(image: ImageProxy) {
+                        try {
+                            val bitmap = image.toBitmap()
+                            image.close()
 
-                        val bgrMat = Mat()
-                        Imgproc.cvtColor(lumaMat, bgrMat, Imgproc.COLOR_GRAY2BGR)
-                        lumaMat.release()
+                            val rgbaMat = Mat()
+                            org.opencv.android.Utils.bitmapToMat(bitmap, rgbaMat)
+                            val bgrMat = Mat()
+                            Imgproc.cvtColor(rgbaMat, bgrMat, Imgproc.COLOR_RGBA2BGR)
+                            rgbaMat.release()
 
-                        val saved = keyframeStore.save(session.sessionId, bgrMat)
-                        session.addRepairFrame(saved, targetCell)
-                        bgrMat.release()
+                            val saved = keyframeStore.save(session.sessionId, bgrMat)
+                            session.addRepairFrame(saved, targetCell)
+                            bgrMat.release()
 
-                        call.resolve(JSObject().apply {
-                            put("frameId", saved.frameId)
-                            put("fullUri", saved.fullUri)
-                            put("thumbnailUri", saved.thumbnailUri)
-                        })
-                    } catch (e: Exception) {
-                        call.reject("IO_ERROR", "Capture save failed: ${e.message}")
+                            call.resolve(
+                                    JSObject().apply {
+                                        put("frameId", saved.frameId)
+                                        put("fullUri", saved.fullUri)
+                                        put("thumbnailUri", saved.thumbnailUri)
+                                    }
+                            )
+                        } catch (e: Exception) {
+                            call.reject("IO_ERROR", "Capture save failed: ${e.message}")
+                        }
+                    }
+
+                    override fun onError(exception: ImageCaptureException) {
+                        call.reject("IO_ERROR", "Capture failed: ${exception.message}")
                     }
                 }
-
-                override fun onError(exception: ImageCaptureException) {
-                    call.reject("IO_ERROR", "Capture failed: ${exception.message}")
-                }
-            }
         )
     }
 }

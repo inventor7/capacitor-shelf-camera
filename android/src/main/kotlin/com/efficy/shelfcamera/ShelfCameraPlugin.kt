@@ -74,7 +74,7 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
         val sensor = TiltSensor(context).also { it.start() }
         tiltSensor = sensor
 
-        val emitter = EventEmitter(this)
+        val emitter = EventEmitter { name, data -> notifyListeners(name, data) }
 
         val monitor = ThermalMonitor(context) { throttled ->
             cameraController?.setThrottled(throttled)
@@ -85,7 +85,7 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
         monitor.start()
         thermalMonitor = monitor
 
-        val controller = CameraController(context, activity, emitter, sensor)
+        val controller = CameraController(context, activity, emitter, sensor, bridge)
         cameraController = controller
         controller.start(size, call)
     }

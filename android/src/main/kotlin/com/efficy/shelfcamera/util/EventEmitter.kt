@@ -8,9 +8,8 @@ import com.getcapacitor.Plugin
  * The plugin reference is nullable so EventEmitter can be instantiated
  * before the plugin is fully wired (e.g. in unit tests).
  */
-class EventEmitter(private val plugin: Plugin?) {
-
+class EventEmitter(private val emitter: ((String, JSObject) -> Unit)?) {
     fun emit(eventName: String, data: JSObject) {
-        plugin?.notifyListeners(eventName, data) ?: Unit
+        emitter?.invoke(eventName, data)
     }
 }
