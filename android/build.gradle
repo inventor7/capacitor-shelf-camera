@@ -78,8 +78,11 @@ dependencies {
     implementation "androidx.camera:camera-lifecycle:$cameraXVersion"
     implementation "androidx.camera:camera-view:$cameraXVersion"
 
-    // OpenCV 4.9 Android SDK (official Maven Central)
-    implementation "org.opencv:opencv:4.9.0"
+    // OpenCV 4.12.0 – full Android SDK module (includes stitching native .so,
+    // ORB, Farneback, Calib3d, etc.). The community Maven artifact
+    // org.opencv:opencv:4.x never shipped Java bindings for the stitching
+    // module, so we use the local SDK module directly instead.
+    implementation project(':opencv')
 
     // Coroutines
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:$coroutinesVersion"
