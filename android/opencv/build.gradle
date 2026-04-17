@@ -1,0 +1,53 @@
+// Minimal Android library wrapper for the OpenCV 4.12.0 Android SDK.
+//
+// The official SDK build.gradle uses externalNativeBuild + prefabPublishing,
+// which requires NDK/CMake and registers prefab variants that AGP 8.x cannot
+// resolve when they are not fully configured. We don't need the C++ build —
+// the pre-built .so is already in native/libs/ and is picked up via jniLibs.
+//
+// This file replaces the official one with a plain android library that:
+//   • compiles the Java bindings from java/src
+//   • packages the pre-built libopencv_java4.so from native/libs
+//   • exposes no prefab / externalNativeBuild variants
+
+apply plugin: 'com.android.library'
+
+android {
+    namespace 'org.opencv'
+    compileSdk 34
+
+    defaultConfig {
+        minSdk 21
+        targetSdk 34
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildTypes {
+        debug {
+            // Keep symbols for easier crash diagnostics during development
+            packagingOptions { doNotStrip '**/*.so' }
+        }
+        release {
+            minifyEnabled false
+            packagingOptions { doNotStrip '**/*.so' }
+        }
+    }
+
+    sourceSets {
+        main {
+            // Pre-built arm64-v8a and armeabi-v7a .so files
+            jniLibs.srcDirs = ['native/libs']
+            // OpenCV Java bindings
+            java.srcDirs  = ['java/src']
+            res.srcDirs   = ['java/res']
+            manifest.srcFile 'java/AndroidManifest.xml'
+        }
+    }
+}
+
+dependencies {
+}

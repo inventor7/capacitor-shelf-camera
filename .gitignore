@@ -5,7 +5,9 @@ node_modules
 # OpenCV Android SDK – 939 MB binary blob, never commit.
 # Setup: download the Android SDK zip from https://opencv.org/releases/,
 # extract it, and place the inner "sdk" folder at android/opencv/.
-android/opencv/
+# build.gradle is tracked (our simplified replacement); everything else is not.
+android/opencv/**
+!android/opencv/build.gradle
 
 # iOS files
 Pods
