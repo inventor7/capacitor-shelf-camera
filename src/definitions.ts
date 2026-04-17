@@ -8,6 +8,13 @@ export type CoachingSignals = {
   lumaMean: number;
   fps: number;
   timestamp: number;
+  /**
+   * When a panorama session is active and the most recent frame was NOT
+   * accepted as a keyframe, this describes why (e.g. "blur too low",
+   * "tilt too high", "waiting for stillness", "dwell (150ms / 300ms)").
+   * Undefined when a keyframe was just accepted or no session is active.
+   */
+  rejectionReason?: string;
 };
 
 export type KeyframeCell = { row: number; col: number };
@@ -45,6 +52,8 @@ export type ShelfCameraError = {
     | 'PERMISSION_DENIED'
     | 'DEVICE_UNSUPPORTED'
     | 'STITCH_FAILED'
+    | 'NO_KEYFRAMES'
+    | 'INSUFFICIENT_KEYFRAMES'
     | 'IO_ERROR'
     | 'ABORTED';
   message: string;

@@ -77,6 +77,29 @@ class PanoramaSession(
     fun commit(call: PluginCall, onReady: (JSObject) -> Unit) {
         stitchExecutor.execute {
             try {
+                // Give the caller an actionable error instead of a generic STITCH_FAILED
+                // when the sweep never produced enough keyframes.
+                if (frameMats.isEmpty()) {
+                    plugin.bridge.activity.runOnUiThread {
+                        call.reject(
+                            "NO_KEYFRAMES",
+                            "No keyframes were accepted during the sweep. " +
+                                "Hold the phone upright, move slowly, and keep good lighting.",
+                        )
+                    }
+                    return@execute
+                }
+                if (frameMats.size < 2) {
+                    plugin.bridge.activity.runOnUiThread {
+                        call.reject(
+                            "INSUFFICIENT_KEYFRAMES",
+                            "Only ${frameMats.size} keyframe captured — need at least 2 to stitch. " +
+                                "Pan across the shelf to capture more frames.",
+                        )
+                    }
+                    return@execute
+                }
+
                 val result = stitchEngine.stitchAll(frameMats)
                 if (!result.success || result.panorama == null) {
                     plugin.bridge.activity.runOnUiThread {
@@ -92,6 +115,27 @@ class PanoramaSession(
                 ).also { it.parentFile?.mkdirs() }
                 val params = org.opencv.core.MatOfInt(Imgcodecs.IMWRITE_JPEG_QUALITY, 92)
                 Imgcodecs.imwrite(panoFile.absolutePath, result.panorama, params)
+
+                // Save copy to device Gallery
+                try {
+                    val values = android.content.ContentValues().apply {
+                        put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, "ShelfCam_${sessionId}.jpg")
+                        put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                            put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_PICTURES + "/ShelfCam")
+                        }
+                    }
+                    val mediaUri = context.contentResolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                    mediaUri?.let { destUri ->
+                        context.contentResolver.openOutputStream(destUri)?.use { os ->
+                            java.io.FileInputStream(panoFile).use { inputStream ->
+                                inputStream.copyTo(os)
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Non-fatal, just skips gallery
+                }
 
                 val event = JSObject().apply {
                     put("sessionId", sessionId)
@@ -114,6 +158,10 @@ class PanoramaSession(
                 plugin.bridge.activity.runOnUiThread {
                     call.reject("STITCH_FAILED", "Commit error: ${e.message}")
                 }
+            } finally {
+                // Prevent memory leak by releasing all Mats
+                frameMats.forEach { it.release() }
+                frameMats.clear()
             }
         }
     }
