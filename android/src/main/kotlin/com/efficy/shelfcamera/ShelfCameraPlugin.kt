@@ -1,6 +1,7 @@
 package com.efficy.shelfcamera
 
 import android.Manifest
+import android.util.Log
 import android.util.Size
 import com.efficy.shelfcamera.sensors.TiltSensor
 import com.efficy.shelfcamera.util.DeviceTier
@@ -34,7 +35,30 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
 
     override fun load() {
         super.load()
-        openCvReady = OpenCVLoader.initLocal()
+        // Explicit System.loadLibrary first so any UnsatisfiedLinkError surfaces
+        // verbatim in logcat. OpenCVLoader.StaticHelper silently swallows the
+        // cause, which makes missing deps (e.g. libc++_shared.so) look like an
+        // opaque DEVICE_UNSUPPORTED. The second call inside initLocal() is a
+        // no-op — System.loadLibrary is idempotent.
+        openCvReady = try {
+            System.loadLibrary("opencv_java4")
+            OpenCVLoader.initLocal()
+        } catch (e: UnsatisfiedLinkError) {
+            Log.e(TAG, "OpenCV native load failed", e)
+            false
+        } catch (t: Throwable) {
+            Log.e(TAG, "OpenCV init failed", t)
+            false
+        }
+        if (openCvReady) {
+            Log.i(TAG, "OpenCV 4.12.0 ready")
+        } else {
+            Log.e(TAG, "OpenCV not ready — start() will reject with DEVICE_UNSUPPORTED")
+        }
+    }
+
+    private companion object {
+        private const val TAG = "ShelfCamera"
     }
 
     @PluginMethod
