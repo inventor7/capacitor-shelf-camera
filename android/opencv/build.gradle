@@ -26,6 +26,12 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
 
+    // CameraBridgeViewBase / JavaCameraView reference org.opencv.BuildConfig.DEBUG.
+    // AGP 8+ defaults buildConfig to false, so we must opt in.
+    buildFeatures {
+        buildConfig true
+    }
+
     buildTypes {
         debug {
             // Keep symbols for easier crash diagnostics during development
