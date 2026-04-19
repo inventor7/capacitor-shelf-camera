@@ -16,10 +16,23 @@
       :frame-count="camera.acceptedKeyframes.value.length"
       @back="navigateBack"
       @toggle-diagnostic="showDiag = !showDiag"
+      @open-settings="showSettings = true"
+    />
+
+    <!-- Capture Mode Selector -->
+    <ModeSelector
+      v-if="
+        isCameraUp &&
+        phase === 'capture' &&
+        camera.acceptedKeyframes.value.length === 0 &&
+        !camera.isRecording.value
+      "
+      v-model="captureMode"
+      :disabled="false"
     />
 
     <!-- Coaching & Tilt - wrapped in stable div to prevent Vue transition crashes -->
-    <div v-show="isCameraUp && phase === 'capture'">
+    <div v-show="isCameraUp && phase === 'capture' && !camera.isRecording.value">
       <CoachingPill :state="coaching" />
 
       <TiltIndicator
@@ -30,10 +43,7 @@
     </div>
 
     <!-- Thumbnail Strip -->
-    <ThumbnailStrip
-      v-if="phase === 'capture'"
-      :uris="camera.acceptedKeyframes.value"
-    />
+    <ThumbnailStrip v-if="phase === 'capture'" :uris="camera.acceptedKeyframes.value" />
 
     <!-- Diagnostic overlay -->
     <Transition name="diag-slide">
@@ -46,8 +56,17 @@
         </div>
         <div class="diag-grid">
           <div class="diag-item">
+            <span class="diag-label">Phase</span>
+            <span class="diag-value" style="font-size: 9px">{{
+              camera.videoProgress.value?.phase || phase
+            }}</span>
+          </div>
+          <div class="diag-item">
             <span class="diag-label">FPS</span>
-            <span class="diag-value">{{ Math.round(latestFrame.fps) }}</span>
+            <span class="diag-value" v-if="!camera.videoProgress.value">{{
+              Math.round(latestFrame.fps)
+            }}</span>
+            <span class="diag-value" v-else>video</span>
           </div>
           <div class="diag-item">
             <span class="diag-label">Blur</span>
@@ -71,7 +90,13 @@
           </div>
           <div class="diag-item diag-item--wide">
             <span class="diag-label">Frames</span>
-            <span class="diag-value diag-value--ok">{{ camera.acceptedKeyframes.value.length }}</span>
+            <span class="diag-value diag-value--ok">
+              {{
+                camera.videoProgress.value
+                  ? `${camera.videoProgress.value.acceptedFrames} acc / ${camera.videoProgress.value.extractedFrames} ext`
+                  : camera.acceptedKeyframes.value.length
+              }}
+            </span>
           </div>
           <div v-if="latestFrame.rejectionReason" class="diag-item diag-item--wide">
             <span class="diag-label">Reject</span>
@@ -113,113 +138,143 @@
       </div>
     </Transition>
 
+    <!-- Settings Sheet -->
+    <SettingsSheet :opened="showSettings" @close="showSettings = false" />
+
     <!-- Capture Controls -->
     <CaptureControls
-      :state="phase"
+      :state="camera.videoProgress.value ? 'stitching' : phase"
+      :mode="captureMode"
+      :is-recording="camera.isRecording.value"
+      :is-processing="!!camera.videoProgress.value"
+      :max-video-duration-ms="settings.thresholds.maxVideoDurationMs"
       @cancel="navigateBack"
       @commit="handleCommit"
       @stop="handleStop"
+      @start-auto="camera.startAutoSweep"
+      @stop-auto="camera.stopAutoSweep"
+      @capture-manual="camera.captureManualFrame"
+      @start-recording="camera.startRecording"
+      @stop-recording="camera.stopRecordingAndProcess"
     />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onUnmounted } from 'vue';
-import { useRouter } from 'vue-router';
-import { useShelfCamera, type CommitResult } from '../../composables/useShelfCamera';
-import { useCoachingState } from '../../composables/useCoachingState';
-import { toWebSrc } from '../../utils/webSrc';
+import { ref, computed, watch, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { useCaptureSettingsStore, type CaptureMode } from '../../stores/captureSettings'
+import { useShelfCamera, type CommitResult } from '../../composables/useShelfCamera'
+import { useCoachingState } from '../../composables/useCoachingState'
+import { toWebSrc } from '../../utils/webSrc'
 
-import PrismEdge from '../../components/ShelfCapture/PrismEdge.vue';
-import TopChrome from '../../components/ShelfCapture/TopChrome.vue';
-import CoachingPill from '../../components/ShelfCapture/CoachingPill.vue';
-import ThumbnailStrip from '../../components/ShelfCapture/ThumbnailStrip.vue';
-import CaptureControls from '../../components/ShelfCapture/CaptureControls.vue';
-import TiltIndicator from '../../components/ShelfCapture/TiltIndicator.vue';
-import GhostGuide from '../../components/ShelfCapture/GhostGuide.vue';
+import PrismEdge from '../../components/ShelfCapture/PrismEdge.vue'
+import TopChrome from '../../components/ShelfCapture/TopChrome.vue'
+import CoachingPill from '../../components/ShelfCapture/CoachingPill.vue'
+import ThumbnailStrip from '../../components/ShelfCapture/ThumbnailStrip.vue'
+import CaptureControls from '../../components/ShelfCapture/CaptureControls.vue'
+import TiltIndicator from '../../components/ShelfCapture/TiltIndicator.vue'
+import GhostGuide from '../../components/ShelfCapture/GhostGuide.vue'
+import ModeSelector from '../../components/ShelfCapture/ModeSelector.vue'
+import SettingsSheet from '../../components/ShelfCapture/SettingsSheet.vue'
 
-import {
-  LucideX,
-  LucideAlertCircle,
-  LucideChevronLeft,
-  LucideImage,
-} from 'lucide-vue-next';
+import { LucideX, LucideAlertCircle, LucideChevronLeft, LucideImage } from 'lucide-vue-next'
 
-type Phase = 'capture' | 'stitching' | 'reviewing';
+type Phase = 'capture' | 'stitching' | 'reviewing'
 
-const router = useRouter();
-const camera = useShelfCamera();
-const coaching = useCoachingState(camera.latestFrame);
+const router = useRouter()
+const settings = useCaptureSettingsStore()
+const camera = useShelfCamera()
+const coaching = useCoachingState(camera.latestFrame)
 
-const phase = ref<Phase>('capture');
-const showDiag = ref(false);
-const errorToast = ref<{ code: string; message: string } | null>(null);
-let toastTimer: ReturnType<typeof setTimeout> | null = null;
+const captureMode = ref<CaptureMode>(settings.activeMode)
+const showSettings = ref(false)
 
-const isCameraUp = computed(() => camera.isCameraActive.value);
-const latestFrame = computed(() => camera.latestFrame.value);
-const panoramaSrc = computed(() => toWebSrc(camera.panoramaUri.value));
+const phase = ref<Phase>('capture')
+const showDiag = ref(false)
+const errorToast = ref<{ code: string; message: string } | null>(null)
+let toastTimer: ReturnType<typeof setTimeout> | null = null
+
+const isCameraUp = computed(() => camera.isCameraActive.value)
+const latestFrame = computed(() => camera.latestFrame.value)
+const panoramaSrc = computed(() => toWebSrc(camera.panoramaUri.value))
 
 const lastAcceptedUri = computed(() => {
-    const uris = camera.acceptedKeyframes.value;
-    return uris.length > 0 ? uris[uris.length - 1] : undefined;
-});
+  const uris = camera.acceptedKeyframes.value
+  return uris.length > 0 ? uris[uris.length - 1] : undefined
+})
 
 // ─── Camera-active transparency ───
-watch(isCameraUp, (active) => {
-    document.documentElement.classList.toggle('camera-active', active);
-    document.body.classList.toggle('camera-active', active);
-}, { immediate: true });
+watch(
+  isCameraUp,
+  (active) => {
+    document.documentElement.classList.toggle('camera-active', active)
+    document.body.classList.toggle('camera-active', active)
+  },
+  { immediate: true },
+)
 
 onUnmounted(() => {
-    document.documentElement.classList.remove('camera-active');
-    document.body.classList.remove('camera-active');
-    camera.stop();
-});
+  document.documentElement.classList.remove('camera-active')
+  document.body.classList.remove('camera-active')
+  camera.stop()
+})
 
-// Start capture on mount
-camera.startSweep();
+// Start capture on mount & on mode switch
+watch(
+  captureMode,
+  async (mode, oldMode) => {
+    settings.setMode(mode) // Persist
+    if (oldMode && isCameraUp.value) {
+      await camera.stop()
+    }
+    camera.startCapture(mode)
+  },
+  { immediate: true },
+)
 
 // ─── Navigation ───
 function navigateBack() {
-    camera.stop();
-    router.replace({ name: 'home' });
+  camera.stop()
+  router.replace({ name: 'home' })
 }
 
 function handleStop() {
-    camera.stop();
-    router.replace({ name: 'home' });
+  camera.stop()
+  router.replace({ name: 'home' })
 }
 
 // ─── Commit flow ───
 function showError(err: Extract<CommitResult, { success: false }>) {
-    errorToast.value = err;
-    if (toastTimer) clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { errorToast.value = null; }, 4500);
+  errorToast.value = err
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => {
+    errorToast.value = null
+  }, 4500)
 }
 
 async function handleCommit() {
-    if (phase.value === 'capture') {
-        if (camera.acceptedKeyframes.value.length === 0) {
-            showError({
-                success: false,
-                code: 'NO_KEYFRAMES',
-                message: 'No frames captured yet. Pan slowly across the shelf.',
-            });
-            return;
-        }
-        phase.value = 'stitching';
-        errorToast.value = null;
-        const result = await camera.commit();
-        if (result.success) {
-            phase.value = 'reviewing';
-        } else {
-            phase.value = 'capture';
-            showError(result);
-        }
-    } else if (phase.value === 'reviewing') {
-        navigateBack();
+  if (phase.value === 'capture') {
+    if (camera.acceptedKeyframes.value.length === 0) {
+      showError({
+        success: false,
+        code: 'NO_KEYFRAMES',
+        message: 'No frames captured yet. Pan slowly across the shelf.',
+      })
+      return
     }
+    phase.value = 'stitching'
+    errorToast.value = null
+    const result = await camera.commit()
+    if (result.success) {
+      phase.value = 'reviewing'
+    } else {
+      phase.value = 'capture'
+      showError(result)
+    }
+  } else if (phase.value === 'reviewing') {
+    navigateBack()
+  }
 }
 </script>
 
@@ -229,18 +284,20 @@ async function handleCommit() {
   inset: 0;
   background: transparent;
   overflow: hidden;
+  color: white;
 }
 
 /* ─── Diagnostic Panel ─── */
 .diag-panel {
   position: fixed;
   top: 96px;
-  left: 12px;
   z-index: 60;
   border-radius: 16px;
+  margin: 16px;
   padding: 12px;
-  max-width: 260px;
+  width: 90%;
   animation: fade-up-in 0.3s var(--ease-out);
+  background-color: rgba(0, 0, 0, 0.395);
 }
 .diag-header {
   display: flex;
@@ -287,9 +344,15 @@ async function handleCommit() {
   font-weight: 500;
   text-align: right;
 }
-.diag-value--ok    { color: var(--ok); }
-.diag-value--warn  { color: var(--warn); }
-.diag-value--block { color: var(--block); }
+.diag-value--ok {
+  color: var(--ok);
+}
+.diag-value--warn {
+  color: var(--warn);
+}
+.diag-value--block {
+  color: var(--block);
+}
 
 /* ─── Error Toast ─── */
 .error-toast {
@@ -303,10 +366,10 @@ async function handleCommit() {
   gap: 10px;
   padding: 14px 16px;
   border-radius: 14px;
-  background: rgba(255,107,138,0.92);
+  background: rgba(255, 107, 138, 0.92);
   backdrop-filter: blur(16px);
   color: white;
-  box-shadow: 0 8px 24px rgba(255,107,138,0.3);
+  box-shadow: 0 8px 24px rgba(255, 107, 138, 0.3);
 }
 .toast-body {
   display: flex;

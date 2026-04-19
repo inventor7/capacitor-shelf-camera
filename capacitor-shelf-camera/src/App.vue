@@ -2,7 +2,7 @@
   <kProvider theme="ios">
     <div class="app-root" data-ir-v2="true">
       <router-view v-slot="{ Component, route }">
-        <Transition :name="route.meta.transition as string ?? 'fade'" mode="out-in">
+        <Transition :name="(route.meta.transition as string) ?? 'fade'" mode="out-in">
           <component :is="Component" :key="route.path" />
         </Transition>
       </router-view>
@@ -11,7 +11,7 @@
 </template>
 
 <script setup lang="ts">
-import { kProvider } from 'konsta/vue';
+import { kProvider } from 'konsta/vue'
 </script>
 
 <style scoped>

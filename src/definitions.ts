@@ -47,6 +47,16 @@ export type PanoramaReadyEvent = {
   seamScore: number;
 };
 
+export type VideoProgressEvent = {
+  sessionId: string;
+  /** Frames decoded from the video so far */
+  extractedFrames: number;
+  /** Frames accepted by KeyframeDecider */
+  acceptedFrames: number;
+  /** Current processing phase */
+  phase: 'recording' | 'extracting' | 'stitching';
+};
+
 export type ShelfCameraError = {
   code:
     | 'PERMISSION_DENIED'
@@ -73,7 +83,12 @@ export interface ShelfCameraPlugin {
 
   beginPanorama(opts: {
     sessionId: string;
-    mode: 'sweep' | 'singleShot';
+    /**
+     * - `'sweep'`      — automatic keyframe acceptance via KeyframeDecider thresholds.
+     * - `'manual'`     — automatic acceptance is disabled; call `capturePhoto()` to add each frame.
+     * - `'singleShot'` — legacy single-frame mode.
+     */
+    mode: 'sweep' | 'singleShot' | 'manual';
     expectedCells?: number;
     keyframeThresholds?: {
       minBlur?: number;
@@ -91,6 +106,35 @@ export interface ShelfCameraPlugin {
   commitPanorama(opts: { sessionId: string }): Promise<PanoramaReadyEvent>;
 
   cancelPanorama(opts: { sessionId: string }): Promise<void>;
+
+  pausePanorama(opts: { sessionId: string }): Promise<void>;
+
+  resumePanorama(opts: { sessionId: string }): Promise<void>;
+
+  /** Video Mode: begin recording a short clip (max 10 s by default). */
+  startVideoCapture(opts: {
+    sessionId: string;
+    maxDurationMs?: number;
+  }): Promise<void>;
+
+  /** Video Mode: stop the recording early. Resolves with the local file URI. */
+  stopVideoCapture(opts: { sessionId: string }): Promise<{ videoUri: string }>;
+
+  /**
+   * Video Mode: decode frames from a recorded video file, run each through
+   * KeyframeDecider, emit `keyframeAccepted` for every passing frame, and
+   * trigger final stitching. Emits `videoProgress` during processing.
+   */
+  processVideo(opts: {
+    sessionId: string;
+    videoUri: string;
+    keyframeThresholds?: {
+      minBlur?: number;
+      maxMotion?: number;
+      maxTiltDeg?: number;
+      minOverlapPct?: number;
+    };
+  }): Promise<void>;
 
   getDeviceTier(): Promise<{ tier: 'low' | 'mid' | 'high' }>;
 
@@ -112,6 +156,11 @@ export interface ShelfCameraPlugin {
   addListener(
     eventName: 'panoramaReady',
     handler: (e: PanoramaReadyEvent) => void,
+  ): Promise<PluginListenerHandle>;
+
+  addListener(
+    eventName: 'videoProgress',
+    handler: (e: VideoProgressEvent) => void,
   ): Promise<PluginListenerHandle>;
 
   addListener(

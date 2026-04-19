@@ -1,27 +1,24 @@
 <template>
   <Transition name="ghost-fade">
     <div v-if="visible && src" class="ghost-guide">
-      <div 
-        class="ghost-image" 
-        :style="{ backgroundImage: `url(${src})` }" 
-      />
+      <div class="ghost-image" :style="{ backgroundImage: `url(${src})` }" />
       <div class="ghost-border" />
     </div>
   </Transition>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
-import { toWebSrc } from '../../utils/webSrc';
+import { computed } from 'vue'
+import { toWebSrc } from '../../utils/webSrc'
 
 const props = defineProps<{
-  visible: boolean;
-  uri?: string;
-}>();
+  visible: boolean
+  uri?: string
+}>()
 
 const src = computed(() => {
-    return props.uri ? toWebSrc(props.uri) : null;
-});
+  return props.uri ? toWebSrc(props.uri) : null
+})
 </script>
 
 <style scoped>
@@ -47,8 +44,8 @@ const src = computed(() => {
   opacity: 0.55;
   transform: scaleX(-1); /* Flips the image horizontally to address mirroring feedback */
   /* Mask it so it fades elegantly into the live view */
-  mask-image: linear-gradient(to left, rgba(0,0,0,1) 30%, rgba(0,0,0,0) 100%);
-  -webkit-mask-image: linear-gradient(to left, rgba(0,0,0,1) 30%, rgba(0,0,0,0) 100%);
+  mask-image: linear-gradient(to left, rgba(0, 0, 0, 1) 30%, rgba(0, 0, 0, 0) 100%);
+  -webkit-mask-image: linear-gradient(to left, rgba(0, 0, 0, 1) 30%, rgba(0, 0, 0, 0) 100%);
 }
 
 .ghost-border {
@@ -57,8 +54,8 @@ const src = computed(() => {
   bottom: 0;
   right: 0;
   width: 2px;
-  background: linear-gradient(to bottom, transparent, rgba(255,255,255,0.5), transparent);
-  box-shadow: 0 0 12px rgba(255,255,255,0.3);
+  background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.5), transparent);
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.3);
 }
 
 .ghost-fade-enter-active,

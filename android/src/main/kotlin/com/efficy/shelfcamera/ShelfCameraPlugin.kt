@@ -7,6 +7,7 @@ import com.efficy.shelfcamera.sensors.TiltSensor
 import com.efficy.shelfcamera.util.DeviceTier
 import com.efficy.shelfcamera.util.EventEmitter
 import com.efficy.shelfcamera.util.ThermalMonitor
+import com.efficy.shelfcamera.keyframe.KeyframeDecider
 import com.getcapacitor.JSObject
 import com.getcapacitor.PermissionState
 import com.getcapacitor.PluginCall
@@ -32,6 +33,9 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
     private var tiltSensor: TiltSensor? = null
     private var thermalMonitor: ThermalMonitor? = null
     private var openCvReady = false
+    private var videoRecorder: VideoRecorder? = null
+    private var videoFrameExtractor: VideoFrameExtractor? = null
+    private val videoStitchExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
 
     override fun load() {
         super.load()
@@ -64,7 +68,7 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
     @PluginMethod
     fun start(call: PluginCall) {
         if (!openCvReady) {
-            call.reject("DEVICE_UNSUPPORTED", "OpenCV initialization failed")
+            call.reject("OpenCV initialization failed", "DEVICE_UNSUPPORTED")
             return
         }
         if (getPermissionState("camera") != PermissionState.GRANTED) {
@@ -83,7 +87,7 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
                 put("code", "PERMISSION_DENIED")
                 put("message", "Camera permission denied")
             })
-            call.reject("PERMISSION_DENIED")
+            call.reject("Camera permission denied", "PERMISSION_DENIED")
         }
     }
 
@@ -160,12 +164,18 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
             call.reject("sessionId is required")
             return
         }
-        val targetCell = call.getObject("targetCell")
         val session = activeSession ?: run {
             call.reject("No active panorama session")
             return
         }
-        cameraController?.captureStill(session, targetCell, call)
+        // In manual mode every tap is a new sequential keyframe; route to the
+        // dedicated path that emits `keyframeAccepted` and updates the overlap reference.
+        if (session.mode == "manual") {
+            cameraController?.captureManualFrame(session, call)
+        } else {
+            val targetCell = call.getObject("targetCell")
+            cameraController?.captureStill(session, targetCell, call)
+        }
     }
 
     @PluginMethod
@@ -200,6 +210,120 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
         activeSession = null
         cameraController?.setActiveSession(null)
         call.resolve()
+    }
+
+    @PluginMethod
+    fun pausePanorama(call: PluginCall) {
+        val sessionId = call.getString("sessionId") ?: run {
+            call.reject("sessionId is required")
+            return
+        }
+        val session = activeSession?.takeIf { it.sessionId == sessionId } ?: run {
+            call.reject("No active session: $sessionId")
+            return
+        }
+        cameraController?.setActiveSession(null)
+        call.resolve(JSObject().put("sessionId", session.sessionId))
+    }
+
+    @PluginMethod
+    fun resumePanorama(call: PluginCall) {
+        val sessionId = call.getString("sessionId") ?: run {
+            call.reject("sessionId is required")
+            return
+        }
+        val session = activeSession?.takeIf { it.sessionId == sessionId } ?: run {
+            call.reject("No active session: $sessionId")
+            return
+        }
+        cameraController?.setActiveSession(session)
+        call.resolve(JSObject().put("sessionId", session.sessionId))
+    }
+
+    @PluginMethod
+    fun startVideoCapture(call: PluginCall) {
+        val sessionId = call.getString("sessionId") ?: run {
+            call.reject("sessionId is required"); return
+        }
+        val session = activeSession?.takeIf { it.sessionId == sessionId } ?: run {
+            call.reject("No active session: $sessionId"); return
+        }
+        val maxDurationMs = call.getLong("maxDurationMs") ?: 10_000L
+        val emitter = EventEmitter { name, data -> notifyListeners(name, data) }
+
+        val recorder = VideoRecorder(context, activity, emitter)
+        videoRecorder = recorder
+
+        cameraController?.bindVideoRecorder(recorder)
+
+        recorder.start(
+            sessionId = sessionId,
+            maxDurationMs = maxDurationMs,
+            onAutoStopped = { /* auto-stopped, do nothing — UI drives commit */ },
+            onError = { msg ->
+                activity.runOnUiThread { call.reject(msg, "IO_ERROR") }
+            },
+        )
+        call.resolve()
+    }
+
+    @PluginMethod
+    fun stopVideoCapture(call: PluginCall) {
+        val recorder = videoRecorder ?: run {
+            call.reject("No active recording"); return
+        }
+        recorder.stop()
+        // Give the finalize callback ~500ms to write the file
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            val sessionId = activeSession?.sessionId ?: "unknown"
+            val filePath = "${context.filesDir}/shelfcam/sessions/$sessionId/video.mp4"
+            call.resolve(JSObject().put("videoUri", "file://$filePath"))
+        }, 600)
+    }
+
+    @PluginMethod
+    fun processVideo(call: PluginCall) {
+        val sessionId = call.getString("sessionId") ?: run {
+            call.reject("sessionId is required"); return
+        }
+        val videoUri = call.getString("videoUri") ?: run {
+            call.reject("videoUri is required"); return
+        }
+        val session = activeSession?.takeIf { it.sessionId == sessionId } ?: run {
+            call.reject("No active session: $sessionId"); return
+        }
+        val thresholdsJson = call.getObject("keyframeThresholds")
+        val thresholds = thresholdsJson?.let {
+            KeyframeDecider.Thresholds(
+                minBlur       = it.getDouble("minBlur").toFloat().takeIf { v -> v > 0 } ?: 0.35f,
+                maxMotion     = it.getDouble("maxMotion").toFloat().takeIf { v -> v > 0 } ?: 0.35f,
+                maxTiltDeg    = it.getDouble("maxTiltDeg").toFloat().takeIf { v -> v > 0 } ?: 20f,
+                minOverlapPct = it.getDouble("minOverlapPct").toFloat().takeIf { v -> v > 0 } ?: 20f,
+            )
+        }
+
+        val emitter = EventEmitter { name, data -> notifyListeners(name, data) }
+        val extractor = VideoFrameExtractor(
+            context = context,
+            emitter = emitter,
+            keyframeStore = com.efficy.shelfcamera.keyframe.KeyframeStore(context),
+            executor = videoStitchExecutor,
+        )
+        videoFrameExtractor = extractor
+
+        extractor.process(
+            session = session,
+            videoUri = videoUri,
+            thresholds = thresholds,
+            onDone = {
+                // Trigger commit stitching
+                session.commit(call) { event -> notifyListeners("panoramaReady", event) }
+            },
+            onError = { msg ->
+                activity.runOnUiThread { call.reject(msg, "STITCH_FAILED") }
+            },
+        )
+        // call will be resolved inside session.commit()
     }
 
     @PluginMethod

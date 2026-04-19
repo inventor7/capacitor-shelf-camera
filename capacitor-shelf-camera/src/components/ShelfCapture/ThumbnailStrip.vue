@@ -22,22 +22,25 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, nextTick } from 'vue';
-import { LucidePlus } from 'lucide-vue-next';
-import { toWebSrc } from '../../utils/webSrc';
+import { computed, ref, watch, nextTick } from 'vue'
+import { LucidePlus } from 'lucide-vue-next'
+import { toWebSrc } from '../../utils/webSrc'
 
-const props = defineProps<{ uris: string[] }>();
+const props = defineProps<{ uris: string[] }>()
 
-const trackEl = ref<HTMLElement | null>(null);
+const trackEl = ref<HTMLElement | null>(null)
 
-const convertedUris = computed(() => props.uris.map(toWebSrc));
+const convertedUris = computed(() => props.uris.map(toWebSrc))
 
-watch(() => props.uris.length, async () => {
-    await nextTick();
+watch(
+  () => props.uris.length,
+  async () => {
+    await nextTick()
     if (trackEl.value) {
-        trackEl.value.scrollLeft = trackEl.value.scrollWidth;
+      trackEl.value.scrollLeft = trackEl.value.scrollWidth
     }
-});
+  },
+)
 </script>
 
 <style scoped>
@@ -63,7 +66,9 @@ watch(() => props.uris.length, async () => {
   height: 100%;
   padding: 4px 0;
 }
-.thumb-track::-webkit-scrollbar { display: none; }
+.thumb-track::-webkit-scrollbar {
+  display: none;
+}
 
 .thumb-cell {
   flex-shrink: 0;
@@ -73,19 +78,20 @@ watch(() => props.uris.length, async () => {
   overflow: hidden;
   position: relative;
   scroll-snap-align: end;
-  border: 2px solid rgba(255,255,255,0.15);
-  background: rgba(255,255,255,0.05);
-  transition: border-color var(--t-short) var(--ease-out),
-              transform var(--t-short) var(--ease-spring);
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+  transition:
+    border-color var(--t-short) var(--ease-out),
+    transform var(--t-short) var(--ease-spring);
 }
 
 .thumb-cell--latest {
   border-color: var(--prism-5);
-  box-shadow: 0 0 12px rgba(126,240,198,0.3);
+  box-shadow: 0 0 12px rgba(126, 240, 198, 0.3);
 }
 
 .thumb-cell--ghost {
-  border: 2px dashed rgba(255,255,255,0.2);
+  border: 2px dashed rgba(255, 255, 255, 0.2);
   background: transparent;
   display: flex;
   align-items: center;
@@ -109,7 +115,7 @@ watch(() => props.uris.length, async () => {
   font-size: 9px;
   font-weight: 700;
   color: var(--text-0);
-  text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
 }
 
 /* Pop-in animation */

@@ -25,7 +25,7 @@ export class ShelfCameraWeb extends WebPlugin implements ShelfCameraPlugin {
 
   async beginPanorama(_opts: {
     sessionId: string;
-    mode: 'sweep' | 'singleShot';
+    mode: 'sweep' | 'singleShot' | 'manual';
     expectedCells?: number;
     keyframeThresholds?: {
       minBlur?: number;
@@ -35,6 +35,14 @@ export class ShelfCameraWeb extends WebPlugin implements ShelfCameraPlugin {
     };
   }): Promise<void> {
     throw this.unimplemented('ShelfCamera.beginPanorama is not supported on web.');
+  }
+
+  async pausePanorama(_opts: { sessionId: string }): Promise<void> {
+    throw this.unimplemented('ShelfCamera.pausePanorama is not supported on web.');
+  }
+
+  async resumePanorama(_opts: { sessionId: string }): Promise<void> {
+    throw this.unimplemented('ShelfCamera.resumePanorama is not supported on web.');
   }
 
   async capturePhoto(_opts: {
@@ -50,6 +58,18 @@ export class ShelfCameraWeb extends WebPlugin implements ShelfCameraPlugin {
 
   async cancelPanorama(_opts: { sessionId: string }): Promise<void> {
     throw this.unimplemented('ShelfCamera.cancelPanorama is not supported on web.');
+  }
+
+  async startVideoCapture(_opts: { sessionId: string; maxDurationMs?: number }): Promise<void> {
+    throw this.unimplemented('ShelfCamera.startVideoCapture is not supported on web.');
+  }
+
+  async stopVideoCapture(_opts: { sessionId: string }): Promise<{ videoUri: string }> {
+    throw this.unimplemented('ShelfCamera.stopVideoCapture is not supported on web.');
+  }
+
+  async processVideo(_opts: { sessionId: string; videoUri: string; keyframeThresholds?: any }): Promise<void> {
+    throw this.unimplemented('ShelfCamera.processVideo is not supported on web.');
   }
 
   async getDeviceTier(): Promise<{ tier: 'low' | 'mid' | 'high' }> {

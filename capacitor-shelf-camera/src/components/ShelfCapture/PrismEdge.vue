@@ -5,12 +5,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
-import type { CoachingState } from '../../composables/useCoachingState';
+import { computed } from 'vue'
+import type { CoachingState } from '../../composables/useCoachingState'
 
-const props = defineProps<{ state: CoachingState }>();
+const props = defineProps<{ state: CoachingState }>()
 
-const edgeClass = computed(() => `prism-edge--${props.state.level}`);
+const edgeClass = computed(() => `prism-edge--${props.state.level}`)
 </script>
 
 <style scoped>
@@ -56,7 +56,11 @@ const edgeClass = computed(() => `prism-edge--${props.state.level}`);
 }
 
 @keyframes prism-sweep {
-  0%   { filter: hue-rotate(0deg); }
-  100% { filter: hue-rotate(360deg); }
+  0% {
+    filter: hue-rotate(0deg);
+  }
+  100% {
+    filter: hue-rotate(360deg);
+  }
 }
 </style>

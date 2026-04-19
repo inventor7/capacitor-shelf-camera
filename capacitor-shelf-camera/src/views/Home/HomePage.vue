@@ -16,12 +16,10 @@
 
     <!-- Actions -->
     <div class="actions">
-      <button class="action-primary" @click="startCapture">
-        <div class="action-primary-inner">
-          <LucideCamera :size="24" />
-          <span>New Capture</span>
-        </div>
-      </button>
+      <kButton class="rounded-2xl p-6 gap-2" @click="startCapture">
+        <LucideCamera :size="24" />
+        <span>New Capture</span>
+      </kButton>
 
       <div class="stats-row">
         <div class="stat-chip glass-surface">
@@ -54,8 +52,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   LucideScanLine,
   LucideCamera,
@@ -65,20 +63,21 @@ import {
   LucideMove3d,
   LucideEye,
   LucideShield,
-} from 'lucide-vue-next';
+} from 'lucide-vue-next'
+import { kButton } from 'konsta/vue'
 
-const router = useRouter();
-const capturedCount = ref(0);
+const router = useRouter()
+const capturedCount = ref(0)
 
 const features = [
-  { icon: LucideWand2,  title: 'Smart Coaching', desc: 'Real-time signals guide your sweep' },
-  { icon: LucideMove3d, title: 'Auto Stitch',    desc: 'OpenCV panorama stitching on-device' },
-  { icon: LucideEye,    title: 'Live Preview',   desc: 'Native camera preview underneath' },
-  { icon: LucideShield, title: 'Gallery Save',   desc: 'Panoramas saved to device gallery' },
-];
+  { icon: LucideWand2, title: 'Smart Coaching', desc: 'Real-time signals guide your sweep' },
+  { icon: LucideMove3d, title: 'Auto Stitch', desc: 'OpenCV panorama stitching on-device' },
+  { icon: LucideEye, title: 'Live Preview', desc: 'Native camera preview underneath' },
+  { icon: LucideShield, title: 'Gallery Save', desc: 'Panoramas saved to device gallery' },
+]
 
 function particleStyle(i: number) {
-  const colors = ['#7aa8ff', '#b593ff', '#ff8ad1', '#ffb26b', '#7ef0c6'];
+  const colors = ['#7aa8ff', '#b593ff', '#ff8ad1', '#ffb26b', '#7ef0c6']
   return {
     left: `${Math.random() * 100}%`,
     top: `${Math.random() * 100}%`,
@@ -87,11 +86,11 @@ function particleStyle(i: number) {
     background: colors[i % colors.length],
     animationDelay: `${Math.random() * 6}s`,
     animationDuration: `${4 + Math.random() * 4}s`,
-  };
+  }
 }
 
 function startCapture() {
-  router.push({ name: 'capture' });
+  router.push({ name: 'capture' })
 }
 </script>
 
@@ -121,9 +120,17 @@ function startCapture() {
   animation: float-up linear infinite;
 }
 @keyframes float-up {
-  0%   { transform: translateY(0) scale(1);   opacity: 0.15; }
-  50%  { opacity: 0.35; }
-  100% { transform: translateY(-100vh) scale(0.5); opacity: 0; }
+  0% {
+    transform: translateY(0) scale(1);
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 0.35;
+  }
+  100% {
+    transform: translateY(-100vh) scale(0.5);
+    opacity: 0;
+  }
 }
 
 /* ─── Hero ─── */
@@ -219,7 +226,6 @@ function startCapture() {
   padding: 16px 24px;
   border-radius: 14px;
   background: var(--bg-0);
-  color: #ffffff !important;
   font-size: 18px;
   font-weight: 600;
   letter-spacing: -0.01em;

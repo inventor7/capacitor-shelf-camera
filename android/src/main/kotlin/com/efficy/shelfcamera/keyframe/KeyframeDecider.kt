@@ -41,6 +41,14 @@ class KeyframeDecider(
         val timestampMs: Long,
     )
 
+    data class Thresholds(
+        val minBlur: Float = 0.35f,
+        val maxMotion: Float = 0.35f,
+        val maxTiltDeg: Float = 20f,
+        val minOverlapPct: Float = 20f,
+    )
+
+
     fun evaluate(s: Signals): Boolean {
         val now = s.timestampMs
 

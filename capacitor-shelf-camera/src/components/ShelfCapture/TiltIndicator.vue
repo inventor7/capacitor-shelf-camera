@@ -25,31 +25,31 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed } from 'vue'
 
 const props = defineProps<{
-  tilt: number;
-  showRef: boolean;
-}>();
+  tilt: number
+  showRef: boolean
+}>()
 
 /** Normalize tilt to a ±range for visual rotation. Cap at ±45 for display. */
 const normalizedTilt = computed(() => {
-    const t = props.tilt;
-    // tiltDeg from native is absolute 0-180. Treat 90 as level (landscape) or 0/180 as level (portrait).
-    // If the value is near 90, phone is landscape level. Near 0 or 180, phone is portrait.
-    // For portrait, ~90 is "level". We show deviation from 90.
-    const deviation = t - 90;
-    return Math.max(-45, Math.min(45, deviation));
-});
+  const t = props.tilt
+  // tiltDeg from native is absolute 0-180. Treat 90 as level (landscape) or 0/180 as level (portrait).
+  // If the value is near 90, phone is landscape level. Near 0 or 180, phone is portrait.
+  // For portrait, ~90 is "level". We show deviation from 90.
+  const deviation = t - 90
+  return Math.max(-45, Math.min(45, deviation))
+})
 
-const isHighTilt = computed(() => Math.abs(normalizedTilt.value) > 20);
-const isWarning = computed(() => Math.abs(normalizedTilt.value) > 8);
-const visible = computed(() => props.showRef && isWarning.value);
+const isHighTilt = computed(() => Math.abs(normalizedTilt.value) > 20)
+const isWarning = computed(() => Math.abs(normalizedTilt.value) > 8)
+const visible = computed(() => props.showRef && isWarning.value)
 
 const horizonClass = computed(() => {
-    if (isHighTilt.value) return 'tilt--block';
-    return 'tilt--warn';
-});
+  if (isHighTilt.value) return 'tilt--block'
+  return 'tilt--warn'
+})
 </script>
 
 <style scoped>
@@ -70,7 +70,7 @@ const horizonClass = computed(() => {
   width: 120px;
   height: 120px;
   border-radius: 50%;
-  border: 1.5px solid rgba(255,255,255,0.15);
+  border: 1.5px solid rgba(255, 255, 255, 0.15);
   position: relative;
   display: flex;
   align-items: center;
@@ -80,7 +80,7 @@ const horizonClass = computed(() => {
 .tilt-crosshair-h,
 .tilt-crosshair-v {
   position: absolute;
-  background: rgba(255,255,255,0.12);
+  background: rgba(255, 255, 255, 0.12);
 }
 .tilt-crosshair-h {
   width: 100%;
@@ -101,8 +101,14 @@ const horizonClass = computed(() => {
   transition: transform 100ms linear;
   box-shadow: 0 0 8px currentColor;
 }
-.tilt-horizon.tilt--warn  { background: var(--warn);  color: var(--warn); }
-.tilt-horizon.tilt--block { background: var(--block); color: var(--block); }
+.tilt-horizon.tilt--warn {
+  background: var(--warn);
+  color: var(--warn);
+}
+.tilt-horizon.tilt--block {
+  background: var(--block);
+  color: var(--block);
+}
 
 .tilt-readout {
   position: absolute;
@@ -111,8 +117,12 @@ const horizonClass = computed(() => {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
-.tilt-readout.tilt--warn  { color: var(--warn); }
-.tilt-readout.tilt--block { color: var(--block); }
+.tilt-readout.tilt--warn {
+  color: var(--warn);
+}
+.tilt-readout.tilt--block {
+  color: var(--block);
+}
 
 .tilt-label {
   font-size: 12px;
@@ -120,7 +130,7 @@ const horizonClass = computed(() => {
   color: var(--text-1);
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
 }
 
 .tilt-fade-enter-active,

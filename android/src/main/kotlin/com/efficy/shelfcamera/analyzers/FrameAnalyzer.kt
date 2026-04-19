@@ -57,6 +57,17 @@ class FrameAnalyzer(
         emitIntervalMs = if (throttled) 200L else 100L // 5 Hz vs 10 Hz
     }
 
+    /**
+     * Called after a manual photo capture so the [OverlapAnalyzer] updates its
+     * reference frame. Subsequent `frame` events will report [overlapPct] relative
+     * to the freshly captured frame, which drives the guide dot colour in manual mode.
+     *
+     * @param bgrMat full-resolution BGR Mat of the captured frame (not released here).
+     */
+    fun notifyManualCapture(bgrMat: Mat) {
+        overlapAnalyzer.updateReference(bgrMat)
+    }
+
     override fun analyze(image: ImageProxy) {
         try {
             val mat = image.toYuvMat() ?: return
@@ -83,7 +94,7 @@ class FrameAnalyzer(
             val overlapPct = overlapAnalyzer.analyze(mat)
 
             val activeSession = session
-            if (activeSession != null && !activeSession.isCancelled) {
+            if (activeSession != null && !activeSession.isCancelled && activeSession.mode == "sweep") {
                 evaluateKeyframe(
                         activeSession,
                         blurScore,

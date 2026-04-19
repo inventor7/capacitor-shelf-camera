@@ -6,9 +6,9 @@ const config: CapacitorConfig = {
   webDir: 'dist',
 
   server: {
-    url: "http://localhost:5174",
-    cleartext: true
-  }
+    url: 'http://localhost:5174',
+    cleartext: true,
+  },
 }
 
 export default config

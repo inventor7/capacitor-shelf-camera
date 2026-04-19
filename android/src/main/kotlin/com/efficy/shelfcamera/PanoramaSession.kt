@@ -54,7 +54,6 @@ class PanoramaSession(
         if (targetCell != null) {
             val row = targetCell.getInt("row")
             val col = targetCell.getInt("col")
-            // Find existing frame at that grid cell and replace
             val idx = acceptedFrames.indexOfFirst { it.frameId == "$row:$col" }
             if (idx >= 0 && idx < frameMats.size) {
                 frameMats[idx].release()
@@ -70,6 +69,14 @@ class PanoramaSession(
         }
     }
 
+    /** Called by [VideoFrameExtractor] to append a pre-saved accepted frame. */
+    fun addVideoFrame(saved: KeyframeStore.SavedFrame) {
+        val mat = Imgcodecs.imread(saved.fullUri.removePrefix("file://"))
+        frameMats.add(mat)
+        acceptedFrames.add(saved)
+    }
+
+
     /**
      * Commit: runs final full-pass stitch on all accepted frames on a background thread.
      * Resolves the [call] with PanoramaReadyEvent and notifies via [onReady].
@@ -82,9 +89,9 @@ class PanoramaSession(
                 if (frameMats.isEmpty()) {
                     plugin.bridge.activity.runOnUiThread {
                         call.reject(
-                            "NO_KEYFRAMES",
                             "No keyframes were accepted during the sweep. " +
                                 "Hold the phone upright, move slowly, and keep good lighting.",
+                            "NO_KEYFRAMES",
                         )
                     }
                     return@execute
@@ -92,18 +99,25 @@ class PanoramaSession(
                 if (frameMats.size < 2) {
                     plugin.bridge.activity.runOnUiThread {
                         call.reject(
-                            "INSUFFICIENT_KEYFRAMES",
                             "Only ${frameMats.size} keyframe captured — need at least 2 to stitch. " +
                                 "Pan across the shelf to capture more frames.",
+                            "INSUFFICIENT_KEYFRAMES",
                         )
                     }
                     return@execute
                 }
 
-                val result = stitchEngine.stitchAll(frameMats)
+                val result = if (mode == "manual") {
+                    stitchEngine.stitchAllManual(frameMats)
+                } else {
+                    stitchEngine.stitchAll(frameMats)
+                }
                 if (!result.success || result.panorama == null) {
                     plugin.bridge.activity.runOnUiThread {
-                        call.reject("STITCH_FAILED", "Final stitching failed")
+                        call.reject(
+                            result.failureReason ?: "Final stitching failed",
+                            "STITCH_FAILED",
+                        )
                     }
                     return@execute
                 }
@@ -156,7 +170,7 @@ class PanoramaSession(
                 }
             } catch (e: Exception) {
                 plugin.bridge.activity.runOnUiThread {
-                    call.reject("STITCH_FAILED", "Commit error: ${e.message}")
+                    call.reject("Commit error: ${e.message}", "STITCH_FAILED")
                 }
             } finally {
                 // Prevent memory leak by releasing all Mats
