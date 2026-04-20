@@ -31,31 +31,7 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
     private var activeSession: PanoramaSession? = null
     private var tiltSensor: TiltSensor? = null
     private var thermalMonitor: ThermalMonitor? = null
-    private var openCvReady = false
 
-    override fun load() {
-        super.load()
-        // Explicit System.loadLibrary first so any UnsatisfiedLinkError surfaces
-        // verbatim in logcat. OpenCVLoader.StaticHelper silently swallows the
-        // cause, which makes missing deps (e.g. libc++_shared.so) look like an
-        // opaque DEVICE_UNSUPPORTED. The second call inside initLocal() is a
-        // no-op — System.loadLibrary is idempotent.
-        openCvReady = try {
-            System.loadLibrary("opencv_java4")
-            OpenCVLoader.initLocal()
-        } catch (e: UnsatisfiedLinkError) {
-            Log.e(TAG, "OpenCV native load failed", e)
-            false
-        } catch (t: Throwable) {
-            Log.e(TAG, "OpenCV init failed", t)
-            false
-        }
-        if (openCvReady) {
-            Log.i(TAG, "OpenCV 4.12.0 ready")
-        } else {
-            Log.e(TAG, "OpenCV not ready — start() will reject with DEVICE_UNSUPPORTED")
-        }
-    }
 
     private companion object {
         private const val TAG = "ShelfCamera"
@@ -63,10 +39,7 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
 
     @PluginMethod
     fun start(call: PluginCall) {
-        if (!openCvReady) {
-            call.reject("DEVICE_UNSUPPORTED", "OpenCV initialization failed")
-            return
-        }
+
         if (getPermissionState("camera") != PermissionState.GRANTED) {
             requestPermissionForAlias("camera", call, "cameraPermCallback")
             return
@@ -83,7 +56,7 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
                 put("code", "PERMISSION_DENIED")
                 put("message", "Camera permission denied")
             })
-            call.reject("PERMISSION_DENIED")
+            call.reject("Camera permission denied", "PERMISSION_DENIED")
         }
     }
 
@@ -145,6 +118,7 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
         val session = PanoramaSession(
             sessionId = sessionId,
             mode = mode,
+            expectedCells = call.getInt("expectedCells"),
             thresholdsJson = thresholds,
             plugin = this,
             context = context,
@@ -160,12 +134,16 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
             call.reject("sessionId is required")
             return
         }
-        val targetCell = call.getObject("targetCell")
         val session = activeSession ?: run {
             call.reject("No active panorama session")
             return
         }
-        cameraController?.captureStill(session, targetCell, call)
+        if (session.mode == "manual") {
+            cameraController?.captureManualFrame(session, call)
+        } else {
+            val targetCell = call.getObject("targetCell")
+            cameraController?.captureStill(session, targetCell, call)
+        }
     }
 
     @PluginMethod
@@ -200,6 +178,34 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
         activeSession = null
         cameraController?.setActiveSession(null)
         call.resolve()
+    }
+
+    @PluginMethod
+    fun pausePanorama(call: PluginCall) {
+        val sessionId = call.getString("sessionId") ?: run {
+            call.reject("sessionId is required")
+            return
+        }
+        val session = activeSession?.takeIf { it.sessionId == sessionId } ?: run {
+            call.reject("No active session: $sessionId")
+            return
+        }
+        cameraController?.setActiveSession(null)
+        call.resolve(JSObject().put("sessionId", session.sessionId))
+    }
+
+    @PluginMethod
+    fun resumePanorama(call: PluginCall) {
+        val sessionId = call.getString("sessionId") ?: run {
+            call.reject("sessionId is required")
+            return
+        }
+        val session = activeSession?.takeIf { it.sessionId == sessionId } ?: run {
+            call.reject("No active session: $sessionId")
+            return
+        }
+        cameraController?.setActiveSession(session)
+        call.resolve(JSObject().put("sessionId", session.sessionId))
     }
 
     @PluginMethod

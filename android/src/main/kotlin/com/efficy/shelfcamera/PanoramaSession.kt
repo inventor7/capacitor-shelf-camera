@@ -18,6 +18,7 @@ import java.util.concurrent.Executors
 class PanoramaSession(
     val sessionId: String,
     val mode: String,
+    expectedCells: Int?,
     thresholdsJson: JSObject?,
     private val plugin: ShelfCameraPlugin,
     private val context: Context,
@@ -31,6 +32,7 @@ class PanoramaSession(
 
     val gridInferrer = GridInferrer()
     val stitchEngine = StitchEngine()
+    val expectedCellCount = expectedCells?.takeIf { it > 0 }
     private val keyframeStore = KeyframeStore(context)
 
     /** Full-res BGR Mats kept in memory for final stitching. */
@@ -82,9 +84,9 @@ class PanoramaSession(
                 if (frameMats.isEmpty()) {
                     plugin.bridge.activity.runOnUiThread {
                         call.reject(
-                            "NO_KEYFRAMES",
                             "No keyframes were accepted during the sweep. " +
                                 "Hold the phone upright, move slowly, and keep good lighting.",
+                            "NO_KEYFRAMES",
                         )
                     }
                     return@execute
@@ -92,18 +94,25 @@ class PanoramaSession(
                 if (frameMats.size < 2) {
                     plugin.bridge.activity.runOnUiThread {
                         call.reject(
-                            "INSUFFICIENT_KEYFRAMES",
                             "Only ${frameMats.size} keyframe captured — need at least 2 to stitch. " +
                                 "Pan across the shelf to capture more frames.",
+                            "INSUFFICIENT_KEYFRAMES",
                         )
                     }
                     return@execute
                 }
 
-                val result = stitchEngine.stitchAll(frameMats)
+                val result = if (mode == "manual") {
+                    stitchEngine.stitchAllManual(frameMats)
+                } else {
+                    stitchEngine.stitchAll(frameMats)
+                }
                 if (!result.success || result.panorama == null) {
                     plugin.bridge.activity.runOnUiThread {
-                        call.reject("STITCH_FAILED", "Final stitching failed")
+                        call.reject(
+                            result.failureReason ?: "Final stitching failed",
+                            "STITCH_FAILED",
+                        )
                     }
                     return@execute
                 }
@@ -156,7 +165,7 @@ class PanoramaSession(
                 }
             } catch (e: Exception) {
                 plugin.bridge.activity.runOnUiThread {
-                    call.reject("STITCH_FAILED", "Commit error: ${e.message}")
+                    call.reject("Commit error: ${e.message}", "STITCH_FAILED")
                 }
             } finally {
                 // Prevent memory leak by releasing all Mats

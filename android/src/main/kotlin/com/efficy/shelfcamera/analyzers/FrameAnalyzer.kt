@@ -43,9 +43,7 @@ class FrameAnalyzer(
 
     fun setSession(s: PanoramaSession?) {
         session = s
-        if (s != null) {
-            overlapAnalyzer.updateReference(null)
-        }
+        overlapAnalyzer.updateReference(s?.frameMats?.lastOrNull())
     }
 
     fun setTiltSensor(sensor: TiltSensor) {
@@ -55,6 +53,10 @@ class FrameAnalyzer(
     fun setThrottled(throttled: Boolean) {
         isThrottled = throttled
         emitIntervalMs = if (throttled) 200L else 100L // 5 Hz vs 10 Hz
+    }
+
+    fun notifyManualCapture(frameMat: Mat) {
+        overlapAnalyzer.updateReference(frameMat)
     }
 
     override fun analyze(image: ImageProxy) {
@@ -84,17 +86,21 @@ class FrameAnalyzer(
 
             val activeSession = session
             if (activeSession != null && !activeSession.isCancelled) {
-                evaluateKeyframe(
-                        activeSession,
-                        blurScore,
-                        motionMagnitude,
-                        tiltDeg,
-                        overlapPct,
-                        lumaMean,
-                        now,
-                        image,
-                        mat
-                )
+                if (activeSession.mode == "manual") {
+                    mat.release()
+                } else {
+                    evaluateKeyframe(
+                            activeSession,
+                            blurScore,
+                            motionMagnitude,
+                            tiltDeg,
+                            overlapPct,
+                            lumaMean,
+                            now,
+                            image,
+                            mat
+                    )
+                }
             } else {
                 mat.release()
             }
@@ -108,8 +114,10 @@ class FrameAnalyzer(
                         put("lumaMean", lumaMean.toDouble())
                         put("fps", fps.toDouble())
                         put("timestamp", now)
-                        activeSession?.keyframeDecider?.lastRejectionReason?.let {
-                            put("rejectionReason", it)
+                        if (activeSession?.mode != "manual") {
+                            activeSession?.keyframeDecider?.lastRejectionReason?.let {
+                                put("rejectionReason", it)
+                            }
                         }
                     }
 
@@ -239,8 +247,8 @@ class FrameAnalyzer(
                                     put("completedCells", session.acceptedFrames.size)
                                     put(
                                             "totalCells",
-                                            session.acceptedFrames.size
-                                    ) // inferred at commit
+                                            session.expectedCellCount ?: session.acceptedFrames.size
+                                    )
                                     put("previewUri", "file://${previewFile.absolutePath}")
                                     put("seamScore", result.seamScore.toDouble())
                                 }

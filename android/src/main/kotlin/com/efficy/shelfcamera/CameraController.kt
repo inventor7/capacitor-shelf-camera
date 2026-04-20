@@ -137,6 +137,135 @@ class CameraController(
         frameAnalyzer?.setThrottled(throttled)
     }
 
+    fun captureManualFrame(session: PanoramaSession, call: PluginCall) {
+        val capture =
+                imageCapture
+                        ?: run {
+                            call.reject("Camera not started")
+                            return
+                        }
+        capture.takePicture(
+                ContextCompat.getMainExecutor(context),
+                object : ImageCapture.OnImageCapturedCallback() {
+                    override fun onCaptureSuccess(image: ImageProxy) {
+                        try {
+                            val bitmap = image.toBitmap()
+                            image.close()
+
+                            val rgbaMat = Mat()
+                            org.opencv.android.Utils.bitmapToMat(bitmap, rgbaMat)
+                            val bgrMat = Mat()
+                            Imgproc.cvtColor(rgbaMat, bgrMat, Imgproc.COLOR_RGBA2BGR)
+                            rgbaMat.release()
+
+                            val col = session.acceptedFrames.size
+                            val saved = keyframeStore.save(session.sessionId, bgrMat)
+                            session.frameMats.add(bgrMat.clone())
+                            session.acceptedFrames.add(saved)
+                            frameAnalyzer?.notifyManualCapture(bgrMat)
+                            bgrMat.release()
+
+                            emitter.emit(
+                                    "keyframeAccepted",
+                                    JSObject().apply {
+                                        put("frameId", saved.frameId)
+                                        put("thumbnailUri", saved.thumbnailUri)
+                                        put("fullUri", saved.fullUri)
+                                        put(
+                                                "gridCell",
+                                                JSObject().apply {
+                                                    put("row", 0)
+                                                    put("col", col)
+                                                }
+                                        )
+                                        put("qualityScore", 1.0)
+                                        put(
+                                                "signals",
+                                                JSObject().apply {
+                                                    put("blurScore", 0.0)
+                                                    put("motionMagnitude", 0.0)
+                                                    put("tiltDeg", 0.0)
+                                                    put("overlapPct", 0.0)
+                                                    put("lumaMean", 128.0)
+                                                    put("fps", 0.0)
+                                                    put("timestamp", System.currentTimeMillis().toDouble())
+                                                }
+                                        )
+                                    }
+                            )
+
+                            if (session.frameMats.size >= 2) {
+                                stitchExecutor.execute {
+                                    try {
+                                        val result =
+                                                session.stitchEngine.stitchIncrementalManual(
+                                                        session.frameMats
+                                                )
+                                        if (result.success && result.panorama != null) {
+                                            val previewFile =
+                                                    java.io.File(
+                                                                    keyframeStore.sessionDir(
+                                                                            session.sessionId
+                                                                    ),
+                                                                    "preview.jpg"
+                                                            )
+                                                            .also {
+                                                                it.parentFile?.mkdirs()
+                                                            }
+                                            org.opencv.imgcodecs.Imgcodecs.imwrite(
+                                                    previewFile.absolutePath,
+                                                    result.panorama
+                                            )
+                                            result.panorama.release()
+
+                                            emitter.emit(
+                                                    "stitchProgress",
+                                                    JSObject().apply {
+                                                        put("sessionId", session.sessionId)
+                                                        put(
+                                                                "completedCells",
+                                                                session.acceptedFrames.size
+                                                        )
+                                                        put(
+                                                                "totalCells",
+                                                                session.expectedCellCount
+                                                                        ?: session.acceptedFrames.size
+                                                        )
+                                                        put(
+                                                                "previewUri",
+                                                                "file://${previewFile.absolutePath}"
+                                                        )
+                                                        put(
+                                                                "seamScore",
+                                                                result.seamScore.toDouble()
+                                                        )
+                                                    }
+                                            )
+                                        }
+                                    } catch (_: Exception) {
+                                    }
+                                }
+                            }
+
+                            call.resolve(
+                                    JSObject().apply {
+                                        put("frameId", saved.frameId)
+                                        put("fullUri", saved.fullUri)
+                                        put("thumbnailUri", saved.thumbnailUri)
+                                    }
+                            )
+                        } catch (e: Exception) {
+                            call.reject("Manual capture failed: ${e.message}", "IO_ERROR")
+                        }
+                    }
+
+                    override fun onError(exception: ImageCaptureException) {
+                        call.reject("Capture failed: ${exception.message}", "IO_ERROR")
+                    }
+                }
+        )
+    }
+
     /**
      * Capture a full-resolution still for a repair frame or manual keyframe. Converts YUV → BGR
      * Mat, saves via [KeyframeStore], and resolves call with URIs.
@@ -174,12 +303,12 @@ class CameraController(
                                     }
                             )
                         } catch (e: Exception) {
-                            call.reject("IO_ERROR", "Capture save failed: ${e.message}")
+                            call.reject("Capture save failed: ${e.message}", "IO_ERROR")
                         }
                     }
 
                     override fun onError(exception: ImageCaptureException) {
-                        call.reject("IO_ERROR", "Capture failed: ${exception.message}")
+                        call.reject("Capture failed: ${exception.message}", "IO_ERROR")
                     }
                 }
         )

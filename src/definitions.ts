@@ -73,7 +73,7 @@ export interface ShelfCameraPlugin {
 
   beginPanorama(opts: {
     sessionId: string;
-    mode: 'sweep' | 'singleShot';
+    mode: 'sweep' | 'singleShot' | 'manual';
     expectedCells?: number;
     keyframeThresholds?: {
       minBlur?: number;
@@ -91,6 +91,10 @@ export interface ShelfCameraPlugin {
   commitPanorama(opts: { sessionId: string }): Promise<PanoramaReadyEvent>;
 
   cancelPanorama(opts: { sessionId: string }): Promise<void>;
+
+  pausePanorama(opts: { sessionId: string }): Promise<void>;
+
+  resumePanorama(opts: { sessionId: string }): Promise<void>;
 
   getDeviceTier(): Promise<{ tier: 'low' | 'mid' | 'high' }>;
 
