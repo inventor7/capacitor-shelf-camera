@@ -7,4 +7,5 @@ data class StitchResult(
     val panorama: Mat?,
     val seamScore: Float,
     val failureReason: String? = null,
+    val stitchMode: String = "feature",
 )

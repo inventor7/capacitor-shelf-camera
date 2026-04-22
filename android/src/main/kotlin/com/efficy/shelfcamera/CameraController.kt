@@ -3,6 +3,7 @@ package com.efficy.shelfcamera
 import android.content.Context
 import android.graphics.Color
 import android.util.Size
+import android.view.View
 import android.view.ViewGroup
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -12,6 +13,7 @@ import androidx.fragment.app.FragmentActivity
 import com.efficy.shelfcamera.analyzers.FrameAnalyzer
 import com.efficy.shelfcamera.keyframe.KeyframeStore
 import com.efficy.shelfcamera.sensors.TiltSensor
+import com.efficy.shelfcamera.stitch.ManualFrameHint
 import com.efficy.shelfcamera.util.EventEmitter
 import com.getcapacitor.Bridge
 import com.getcapacitor.JSObject
@@ -31,6 +33,13 @@ class CameraController(
         private val tiltSensor: TiltSensor,
         private val bridge: Bridge,
 ) {
+    private data class PreviewFrameSpec(
+            val xPx: Int,
+            val yPx: Int,
+            val widthPx: Int,
+            val heightPx: Int,
+    )
+
     private val analyzerExecutor = Executors.newSingleThreadExecutor()
     private val stitchExecutor = Executors.newSingleThreadExecutor()
     private var previewUseCase: Preview? = null
@@ -39,6 +48,7 @@ class CameraController(
     private var provider: ProcessCameraProvider? = null
     private var previewView: PreviewView? = null
     private var frameAnalyzer: FrameAnalyzer? = null
+    private var previewFrameSpec: PreviewFrameSpec? = null
     private val keyframeStore = KeyframeStore(context)
 
     fun start(resolution: Size, call: PluginCall) {
@@ -48,6 +58,9 @@ class CameraController(
 
             previewView =
                     PreviewView(context).apply {
+                        scaleType = PreviewView.ScaleType.FIT_CENTER
+                        alpha = 0f
+                        visibility = View.INVISIBLE
                         layoutParams =
                                 ViewGroup.LayoutParams(
                                         ViewGroup.LayoutParams.MATCH_PARENT,
@@ -55,6 +68,7 @@ class CameraController(
                                 )
                     }
             parent?.addView(previewView, 0) // add underneath WebView
+            applyPreviewFrame()
 
             val future = ProcessCameraProvider.getInstance(context)
             future.addListener(
@@ -82,6 +96,7 @@ class CameraController(
 
                             imageCapture =
                                     ImageCapture.Builder()
+                                            .setTargetResolution(resolution)
                                             .setCaptureMode(
                                                     ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
                                             )
@@ -129,12 +144,39 @@ class CameraController(
         }
     }
 
+    fun setPreviewFrame(x: Double, y: Double, width: Double, height: Double) {
+        val density = context.resources.displayMetrics.density.toDouble()
+        previewFrameSpec =
+                PreviewFrameSpec(
+                        xPx = (x * density).toInt(),
+                        yPx = (y * density).toInt(),
+                        widthPx = (width * density).toInt(),
+                        heightPx = (height * density).toInt(),
+                )
+        activity.runOnUiThread { applyPreviewFrame() }
+    }
+
     fun setActiveSession(session: PanoramaSession?) {
         frameAnalyzer?.setSession(session)
     }
 
     fun setThrottled(throttled: Boolean) {
         frameAnalyzer?.setThrottled(throttled)
+    }
+
+    private fun applyPreviewFrame() {
+        val frame = previewFrameSpec ?: return
+        val view = previewView ?: return
+        val params =
+                view.layoutParams
+                        ?: ViewGroup.LayoutParams(frame.widthPx, frame.heightPx)
+        params.width = frame.widthPx
+        params.height = frame.heightPx
+        view.layoutParams = params
+        view.x = frame.xPx.toFloat()
+        view.y = frame.yPx.toFloat()
+        view.alpha = 1f
+        view.visibility = View.VISIBLE
     }
 
     fun captureManualFrame(session: PanoramaSession, call: PluginCall) {
@@ -158,12 +200,40 @@ class CameraController(
                             Imgproc.cvtColor(rgbaMat, bgrMat, Imgproc.COLOR_RGBA2BGR)
                             rgbaMat.release()
 
+                            val signals = frameAnalyzer?.latestSignalSnapshot()
                             val col = session.acceptedFrames.size
                             val saved = keyframeStore.save(session.sessionId, bgrMat)
                             session.frameMats.add(bgrMat.clone())
                             session.acceptedFrames.add(saved)
+                            session.manualFrameHints.add(
+                                    if (col == 0) {
+                                        ManualFrameHint()
+                                    } else {
+                                        ManualFrameHint(
+                                                horizontalShiftPct =
+                                                        signals?.horizontalShiftPct ?: 0f,
+                                                verticalShiftPct =
+                                                        signals?.verticalShiftPct ?: 0f,
+                                        )
+                                    }
+                            )
                             frameAnalyzer?.notifyManualCapture(bgrMat)
                             bgrMat.release()
+
+                            val blurScore = 0f
+                            val motionMagnitude = 0f
+                            val tiltDeg = signals?.tiltDeg ?: 0f
+                            val rollDeg = signals?.rollDeg ?: 0f
+                            val levelOffsetX = signals?.levelOffsetX ?: 0f
+                            val levelOffsetY = signals?.levelOffsetY ?: 0f
+                            val overlapPct = signals?.overlapPct ?: 0f
+                            val horizontalShiftPct = signals?.horizontalShiftPct ?: 0f
+                            val verticalShiftPct = signals?.verticalShiftPct ?: 0f
+                            val overlapConfidencePct = signals?.overlapConfidencePct ?: 0f
+                            val lumaMean = 0f
+                            val fps = signals?.fps ?: 0f
+                            val timestamp = signals?.timestamp ?: System.currentTimeMillis()
+                            val qualityScore = 1f
 
                             emitter.emit(
                                     "keyframeAccepted",
@@ -178,17 +248,32 @@ class CameraController(
                                                     put("col", col)
                                                 }
                                         )
-                                        put("qualityScore", 1.0)
+                                        put("qualityScore", qualityScore.toDouble())
                                         put(
                                                 "signals",
                                                 JSObject().apply {
-                                                    put("blurScore", 0.0)
-                                                    put("motionMagnitude", 0.0)
-                                                    put("tiltDeg", 0.0)
-                                                    put("overlapPct", 0.0)
-                                                    put("lumaMean", 128.0)
-                                                    put("fps", 0.0)
-                                                    put("timestamp", System.currentTimeMillis().toDouble())
+                                                    put("blurScore", blurScore.toDouble())
+                                                    put("motionMagnitude", motionMagnitude.toDouble())
+                                                    put("tiltDeg", tiltDeg.toDouble())
+                                                    put("rollDeg", rollDeg.toDouble())
+                                                    put("levelOffsetX", levelOffsetX.toDouble())
+                                                    put("levelOffsetY", levelOffsetY.toDouble())
+                                                    put("overlapPct", overlapPct.toDouble())
+                                                    put(
+                                                            "horizontalShiftPct",
+                                                            horizontalShiftPct.toDouble()
+                                                    )
+                                                    put(
+                                                            "verticalShiftPct",
+                                                            verticalShiftPct.toDouble()
+                                                    )
+                                                    put(
+                                                            "overlapConfidencePct",
+                                                            overlapConfidencePct.toDouble()
+                                                    )
+                                                    put("lumaMean", lumaMean.toDouble())
+                                                    put("fps", fps.toDouble())
+                                                    put("timestamp", timestamp)
                                                 }
                                         )
                                     }

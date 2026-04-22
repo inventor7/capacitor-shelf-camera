@@ -4,6 +4,7 @@ import android.content.Context
 import com.efficy.shelfcamera.keyframe.GridInferrer
 import com.efficy.shelfcamera.keyframe.KeyframeDecider
 import com.efficy.shelfcamera.keyframe.KeyframeStore
+import com.efficy.shelfcamera.stitch.ManualFrameHint
 import com.efficy.shelfcamera.stitch.StitchEngine
 import com.getcapacitor.JSObject
 import com.getcapacitor.PluginCall
@@ -40,6 +41,7 @@ class PanoramaSession(
 
     /** Metadata for each accepted frame (for URI resolution). */
     val acceptedFrames = mutableListOf<KeyframeStore.SavedFrame>()
+    val manualFrameHints = mutableListOf<ManualFrameHint>()
 
     var isCancelled = false
         private set
@@ -76,7 +78,7 @@ class PanoramaSession(
      * Commit: runs final full-pass stitch on all accepted frames on a background thread.
      * Resolves the [call] with PanoramaReadyEvent and notifies via [onReady].
      */
-    fun commit(call: PluginCall, onReady: (JSObject) -> Unit) {
+    fun commit(call: PluginCall, manualDirection: String, onReady: (JSObject) -> Unit) {
         stitchExecutor.execute {
             try {
                 // Give the caller an actionable error instead of a generic STITCH_FAILED
@@ -84,14 +86,13 @@ class PanoramaSession(
                 if (frameMats.isEmpty()) {
                     plugin.bridge.activity.runOnUiThread {
                         call.reject(
-                            "No keyframes were accepted during the sweep. " +
-                                "Hold the phone upright, move slowly, and keep good lighting.",
+                            "No frames captured yet. Capture at least one shelf photo before stitching.",
                             "NO_KEYFRAMES",
                         )
                     }
                     return@execute
                 }
-                if (frameMats.size < 2) {
+                if (mode != "manual" && frameMats.size < 2) {
                     plugin.bridge.activity.runOnUiThread {
                         call.reject(
                             "Only ${frameMats.size} keyframe captured — need at least 2 to stitch. " +
@@ -103,7 +104,11 @@ class PanoramaSession(
                 }
 
                 val result = if (mode == "manual") {
-                    stitchEngine.stitchAllManual(frameMats)
+                    stitchEngine.stitchAllManual(
+                        frameMats,
+                        if (manualDirection == "left") "left" else "right",
+                        manualFrameHints.toList(),
+                    )
                 } else {
                     stitchEngine.stitchAll(frameMats)
                 }
@@ -143,21 +148,29 @@ class PanoramaSession(
                         }
                     }
                 } catch (e: Exception) {
-                    // Non-fatal, just skips gallery
                 }
+
+                val acceptedFrameCount = acceptedFrames.size.coerceAtLeast(1)
+                keyframeStore.cleanupIntermediates(sessionId)
 
                 val event = JSObject().apply {
                     put("sessionId", sessionId)
                     put("uri", "file://${panoFile.absolutePath}")
                     put("width", result.panorama.width())
                     put("height", result.panorama.height())
-                    put("gridRows", gridInferrer.currentRow + 1)
-                    put("gridCols", gridInferrer.currentCol + 1)
+                    put("gridRows", if (mode == "manual") 1 else gridInferrer.currentRow + 1)
+                    put(
+                        "gridCols",
+                        if (mode == "manual") acceptedFrameCount else gridInferrer.currentCol + 1,
+                    )
                     put("durationMs", System.currentTimeMillis() - startTimeMs)
                     put("seamScore", result.seamScore.toDouble())
+                    put("stitchMode", result.stitchMode)
                 }
 
                 result.panorama.release()
+                acceptedFrames.clear()
+                manualFrameHints.clear()
 
                 plugin.bridge.activity.runOnUiThread {
                     onReady(event)
@@ -168,9 +181,10 @@ class PanoramaSession(
                     call.reject("Commit error: ${e.message}", "STITCH_FAILED")
                 }
             } finally {
-                // Prevent memory leak by releasing all Mats
                 frameMats.forEach { it.release() }
                 frameMats.clear()
+                acceptedFrames.clear()
+                manualFrameHints.clear()
             }
         }
     }
@@ -180,6 +194,7 @@ class PanoramaSession(
         frameMats.forEach { it.release() }
         frameMats.clear()
         acceptedFrames.clear()
+        manualFrameHints.clear()
         keyframeStore.deleteSession(sessionId)
         stitchExecutor.shutdown()
     }
@@ -187,6 +202,8 @@ class PanoramaSession(
     fun release() {
         frameMats.forEach { it.release() }
         frameMats.clear()
+        acceptedFrames.clear()
+        manualFrameHints.clear()
         stitchExecutor.shutdown()
     }
 }

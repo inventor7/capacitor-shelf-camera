@@ -14,6 +14,41 @@ import org.opencv.core.Core
 import org.opencv.core.Mat
 import org.opencv.imgproc.Imgproc
 
+data class FrameSignalSnapshot(
+        val blurScore: Float,
+        val motionMagnitude: Float,
+        val tiltDeg: Float,
+        val rollDeg: Float,
+        val levelOffsetX: Float,
+        val levelOffsetY: Float,
+        val overlapPct: Float,
+        val horizontalShiftPct: Float,
+        val verticalShiftPct: Float,
+        val overlapConfidencePct: Float,
+        val lumaMean: Float,
+        val fps: Float,
+        val timestamp: Long,
+        val rejectionReason: String? = null,
+) {
+    fun toJsObject(): JSObject =
+            JSObject().apply {
+                put("blurScore", blurScore.toDouble())
+                put("motionMagnitude", motionMagnitude.toDouble())
+                put("tiltDeg", tiltDeg.toDouble())
+                put("rollDeg", rollDeg.toDouble())
+                put("levelOffsetX", levelOffsetX.toDouble())
+                put("levelOffsetY", levelOffsetY.toDouble())
+                put("overlapPct", overlapPct.toDouble())
+                put("horizontalShiftPct", horizontalShiftPct.toDouble())
+                put("verticalShiftPct", verticalShiftPct.toDouble())
+                put("overlapConfidencePct", overlapConfidencePct.toDouble())
+                put("lumaMean", lumaMean.toDouble())
+                put("fps", fps.toDouble())
+                put("timestamp", timestamp)
+                rejectionReason?.let { put("rejectionReason", it) }
+            }
+}
+
 /**
  * ImageAnalysis.Analyzer orchestrator: pulls luma Mat from each frame, runs blur + motion + reads
  * tilt + luma-mean, aggregates CoachingSignals, and emits via [EventEmitter] throttled to 10 Hz.
@@ -40,6 +75,7 @@ class FrameAnalyzer(
 
     private var emitIntervalMs = 100L // 10 Hz normal, 200L when throttled
     private var isThrottled = false
+    private var latestSignals: FrameSignalSnapshot? = null
 
     fun setSession(s: PanoramaSession?) {
         session = s
@@ -58,6 +94,8 @@ class FrameAnalyzer(
     fun notifyManualCapture(frameMat: Mat) {
         overlapAnalyzer.updateReference(frameMat)
     }
+
+    fun latestSignalSnapshot(): FrameSignalSnapshot? = latestSignals
 
     override fun analyze(image: ImageProxy) {
         try {
@@ -78,13 +116,18 @@ class FrameAnalyzer(
             }
             lastEmitMs = now
 
-            val blurScore = blurAnalyzer.analyze(mat)
-            val motionMagnitude = motionAnalyzer.analyze(mat)
-            val tiltDeg = tiltSensor?.currentTiltDeg ?: 0f
-            val lumaMean = computeLumaMean(mat)
-            val overlapPct = overlapAnalyzer.analyze(mat)
-
             val activeSession = session
+            val isManualSession = activeSession?.mode == "manual"
+            val blurScore = if (isManualSession) 0f else blurAnalyzer.analyze(mat)
+            val motionMagnitude = if (isManualSession) 0f else motionAnalyzer.analyze(mat)
+            val tiltDeg = tiltSensor?.currentTiltDeg ?: 0f
+            val rollDeg = tiltSensor?.currentRollDeg ?: 0f
+            val levelOffsetX = tiltSensor?.levelOffsetX ?: 0f
+            val levelOffsetY = tiltSensor?.levelOffsetY ?: 0f
+            val lumaMean = if (isManualSession) 0f else computeLumaMean(mat)
+            val overlapMeasurement = overlapAnalyzer.analyze(mat)
+            val overlapPct = overlapMeasurement.overlapPct
+
             if (activeSession != null && !activeSession.isCancelled) {
                 if (activeSession.mode == "manual") {
                     mat.release()
@@ -94,7 +137,10 @@ class FrameAnalyzer(
                             blurScore,
                             motionMagnitude,
                             tiltDeg,
-                            overlapPct,
+                            rollDeg,
+                            levelOffsetX,
+                            levelOffsetY,
+                            overlapMeasurement,
                             lumaMean,
                             now,
                             image,
@@ -105,23 +151,30 @@ class FrameAnalyzer(
                 mat.release()
             }
 
-            val signals =
-                    JSObject().apply {
-                        put("blurScore", blurScore.toDouble())
-                        put("motionMagnitude", motionMagnitude.toDouble())
-                        put("tiltDeg", tiltDeg.toDouble())
-                        put("overlapPct", overlapPct.toDouble())
-                        put("lumaMean", lumaMean.toDouble())
-                        put("fps", fps.toDouble())
-                        put("timestamp", now)
-                        if (activeSession?.mode != "manual") {
-                            activeSession?.keyframeDecider?.lastRejectionReason?.let {
-                                put("rejectionReason", it)
-                            }
-                        }
-                    }
+            latestSignals =
+                    FrameSignalSnapshot(
+                            blurScore = blurScore,
+                            motionMagnitude = motionMagnitude,
+                            tiltDeg = tiltDeg,
+                            rollDeg = rollDeg,
+                            levelOffsetX = levelOffsetX,
+                            levelOffsetY = levelOffsetY,
+                            overlapPct = overlapPct,
+                            horizontalShiftPct = overlapMeasurement.horizontalShiftPct,
+                            verticalShiftPct = overlapMeasurement.verticalShiftPct,
+                            overlapConfidencePct = overlapMeasurement.confidencePct,
+                            lumaMean = lumaMean,
+                            fps = fps,
+                            timestamp = now,
+                            rejectionReason =
+                                    if (activeSession?.mode == "manual") {
+                                        null
+                                    } else {
+                                        activeSession?.keyframeDecider?.lastRejectionReason
+                                    },
+                    )
 
-            emitter.emit("frame", signals)
+            emitter.emit("frame", latestSignals!!.toJsObject())
         } finally {
             image.close()
         }
@@ -136,7 +189,10 @@ class FrameAnalyzer(
             blur: Float,
             motion: Float,
             tilt: Float,
-            overlap: Float,
+            rollDeg: Float,
+            levelOffsetX: Float,
+            levelOffsetY: Float,
+            overlapMeasurement: OverlapMeasurement,
             luma: Float,
             nowMs: Long,
             image: ImageProxy,
@@ -148,7 +204,7 @@ class FrameAnalyzer(
                                 blurScore = blur,
                                 motionMagnitude = motion,
                                 tiltDeg = tilt,
-                                overlapPct = overlap,
+                                overlapPct = overlapMeasurement.overlapPct,
                                 lumaMean = luma,
                                 timestampMs = nowMs,
                         )
@@ -212,7 +268,22 @@ class FrameAnalyzer(
                                 put("blurScore", blur.toDouble())
                                 put("motionMagnitude", motion.toDouble())
                                 put("tiltDeg", tilt.toDouble())
-                                put("overlapPct", overlap.toDouble())
+                                put("rollDeg", rollDeg.toDouble())
+                                put("levelOffsetX", levelOffsetX.toDouble())
+                                put("levelOffsetY", levelOffsetY.toDouble())
+                                put("overlapPct", overlapMeasurement.overlapPct.toDouble())
+                                put(
+                                        "horizontalShiftPct",
+                                        overlapMeasurement.horizontalShiftPct.toDouble()
+                                )
+                                put(
+                                        "verticalShiftPct",
+                                        overlapMeasurement.verticalShiftPct.toDouble()
+                                )
+                                put(
+                                        "overlapConfidencePct",
+                                        overlapMeasurement.confidencePct.toDouble()
+                                )
                                 put("lumaMean", luma.toDouble())
                                 put("fps", fps.toDouble())
                                 put("timestamp", nowMs)

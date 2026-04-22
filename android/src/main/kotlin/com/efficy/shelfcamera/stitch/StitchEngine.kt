@@ -47,6 +47,7 @@ class StitchEngine {
 
     private val orb     = ORB.create(ORB_FEATURES)
     private val matcher = BFMatcher.create(Core.NORM_HAMMING, false)
+    private val manualFallbackStitcher = ManualFallbackStitcher()
     private val defaultProfile = StitchProfile(
         loweRatio = DEFAULT_LOWE_RATIO,
         minGoodMatches = DEFAULT_MIN_GOOD_MATCHES,
@@ -88,7 +89,11 @@ class StitchEngine {
         return runStitch(frames, "FULL", defaultProfile)
     }
 
-    fun stitchAllManual(frames: List<Mat>): StitchResult {
+    fun stitchAllManual(
+        frames: List<Mat>,
+        direction: String = "right",
+        hints: List<ManualFrameHint> = emptyList(),
+    ): StitchResult {
         if (frames.isEmpty()) {
             Log.w(TAG, "stitchAllManual called with empty frame list")
             return StitchResult(false, null, 0f, "No frames were provided for stitching.")
@@ -97,7 +102,11 @@ class StitchEngine {
             Log.i(TAG, "stitchAllManual: single frame, returning as-is")
             return StitchResult(true, frames[0].clone(), 1f)
         }
-        return runStitch(frames, "FULL-MANUAL", manualProfile)
+        val featureResult = runStitch(frames, "FULL-MANUAL", manualProfile)
+        if (featureResult.success) {
+            return featureResult
+        }
+        return manualFallbackStitcher.stitch(frames, direction, hints)
     }
 
     /**

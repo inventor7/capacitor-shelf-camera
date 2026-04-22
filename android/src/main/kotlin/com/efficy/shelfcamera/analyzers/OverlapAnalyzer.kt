@@ -1,58 +1,57 @@
 package com.efficy.shelfcamera.analyzers
 
+import kotlin.math.abs
 import org.opencv.calib3d.Calib3d
-import org.opencv.core.*
+import org.opencv.core.Core
+import org.opencv.core.Mat
+import org.opencv.core.MatOfDMatch
+import org.opencv.core.MatOfKeyPoint
+import org.opencv.core.MatOfPoint2f
 import org.opencv.features2d.BFMatcher
 import org.opencv.features2d.ORB
 
-/**
- * Computes % overlap between the current frame and the last accepted keyframe
- * using ORB feature matching + RANSAC homography inlier ratio.
- *
- * Runs every 3rd call to spare CPU (~3.3 Hz when frames arrive at 10 Hz).
- *
- * Mat lifecycle: all OpenCV Mats allocated in [analyze] are released in the
- * `finally` block. Reference Mats held across calls are replaced/released in
- * [updateReference].
- */
+data class OverlapMeasurement(
+        val overlapPct: Float = 0f,
+        val horizontalShiftPct: Float = 0f,
+        val verticalShiftPct: Float = 0f,
+        val confidencePct: Float = 0f,
+)
+
 class OverlapAnalyzer {
 
-    private val orb     = ORB.create(500)
+    private val orb = ORB.create(500)
     private val matcher = BFMatcher.create(Core.NORM_HAMMING, true)
 
-    private var prevKeyframeMat:  Mat? = null
+    private var prevKeyframeMat: Mat? = null
     private var prevKeyframeDesc: Mat? = null
-    private var prevKeyframeKps:  MatOfKeyPoint? = null
+    private var prevKeyframeKps: MatOfKeyPoint? = null
     private var frameCounter = 0
-    private var prevOverlapPct = 0f
+    private var prevMeasurement = OverlapMeasurement()
 
-    /**
-     * @param lumaMat current grayscale frame (CV_8UC1)
-     * @return overlap percentage [0..100]; 0 if no reference yet or too few matches.
-     */
-    fun analyze(lumaMat: Mat): Float {
+    fun analyze(lumaMat: Mat): OverlapMeasurement {
         frameCounter++
-        if (frameCounter % 3 != 0) return prevOverlapPct
+        if (frameCounter % 3 != 0) return prevMeasurement
 
-        // Fast-path: nothing to compare against — skip ORB entirely.
-        val refDesc = prevKeyframeDesc ?: return 0f
-        val refKps  = prevKeyframeKps ?: return 0f
-        if (refDesc.empty()) return 0f
+        val refDesc = prevKeyframeDesc ?: return OverlapMeasurement()
+        val refKps = prevKeyframeKps ?: return OverlapMeasurement()
+        if (refDesc.empty()) return OverlapMeasurement()
 
         val kps = MatOfKeyPoint()
         val desc = Mat()
+        val featureMask = Mat()
         val mask = Mat()
         val matchesList = MatOfDMatch()
         var srcPts: MatOfPoint2f? = null
         var dstPts: MatOfPoint2f? = null
+        var homography: Mat? = null
 
         return try {
-            orb.detectAndCompute(lumaMat, Mat(), kps, desc)
-            if (desc.empty()) return 0f
+            orb.detectAndCompute(lumaMat, featureMask, kps, desc)
+            if (desc.empty()) return prevMeasurement
 
             matcher.match(refDesc, desc, matchesList)
             val matches = matchesList.toList()
-            if (matches.size < 8) return 0f
+            if (matches.size < 8) return prevMeasurement
 
             val refKpList = refKps.toList()
             val curKpList = kps.toList()
@@ -60,47 +59,107 @@ class OverlapAnalyzer {
             srcPts = MatOfPoint2f(*matches.map { refKpList[it.queryIdx].pt }.toTypedArray())
             dstPts = MatOfPoint2f(*matches.map { curKpList[it.trainIdx].pt }.toTypedArray())
 
-            Calib3d.findHomography(srcPts, dstPts, Calib3d.RANSAC, 3.0, mask)
-            if (mask.empty()) return 0f
+            homography = Calib3d.findHomography(srcPts, dstPts, Calib3d.RANSAC, 3.0, mask)
+            if (mask.empty()) return prevMeasurement
 
-            val inliers = (0 until mask.rows()).count { mask.get(it, 0)[0] != 0.0 }
-            prevOverlapPct = (inliers.toFloat() / matches.size * 100f).coerceIn(0f, 100f)
-            prevOverlapPct
-        } catch (e: Exception) {
-            // Overlap failure is non-fatal — just return the last known value.
-            0f
+            val inlierIndices =
+                    (0 until mask.rows()).filter { mask.get(it, 0)[0] != 0.0 }
+            if (inlierIndices.size < 6) return prevMeasurement
+
+            val dxValues =
+                    inlierIndices.map { index ->
+                        curKpList[matches[index].trainIdx].pt.x - refKpList[matches[index].queryIdx].pt.x
+                    }
+            val dyValues =
+                    inlierIndices.map { index ->
+                        curKpList[matches[index].trainIdx].pt.y - refKpList[matches[index].queryIdx].pt.y
+                    }
+
+            val medianDxPx = median(dxValues).toFloat()
+            val medianDyPx = median(dyValues).toFloat()
+            val frameWidth = lumaMat.cols().coerceAtLeast(1).toFloat()
+            val frameHeight = lumaMat.rows().coerceAtLeast(1).toFloat()
+            val measured =
+                    OverlapMeasurement(
+                            overlapPct =
+                                    (100f - abs(medianDxPx) / frameWidth * 100f).coerceIn(0f, 100f),
+                            horizontalShiftPct =
+                                    (medianDxPx / frameWidth * 100f).coerceIn(-100f, 100f),
+                            verticalShiftPct =
+                                    (medianDyPx / frameHeight * 100f).coerceIn(-100f, 100f),
+                            confidencePct =
+                                    (inlierIndices.size.toFloat() / matches.size.toFloat() * 100f)
+                                            .coerceIn(0f, 100f),
+                    )
+
+            prevMeasurement =
+                    if (prevMeasurement.confidencePct <= 0f) {
+                        measured
+                    } else {
+                        OverlapMeasurement(
+                                overlapPct = lerp(prevMeasurement.overlapPct, measured.overlapPct),
+                                horizontalShiftPct =
+                                        lerp(
+                                                prevMeasurement.horizontalShiftPct,
+                                                measured.horizontalShiftPct
+                                        ),
+                                verticalShiftPct =
+                                        lerp(
+                                                prevMeasurement.verticalShiftPct,
+                                                measured.verticalShiftPct
+                                        ),
+                                confidencePct = measured.confidencePct,
+                        )
+                    }
+
+            prevMeasurement
+        } catch (_: Exception) {
+            prevMeasurement
         } finally {
             kps.release()
             desc.release()
+            featureMask.release()
             mask.release()
             matchesList.release()
             srcPts?.release()
             dstPts?.release()
+            homography?.release()
         }
     }
 
-    /**
-     * Called when a keyframe is accepted — updates the reference frame.
-     * Pass `null` to reset (e.g. at the start of a new session).
-     */
     fun updateReference(keyframeMat: Mat?) {
         prevKeyframeMat?.release()
         prevKeyframeDesc?.release()
         prevKeyframeKps?.release()
-        prevKeyframeMat  = null
+        prevKeyframeMat = null
         prevKeyframeDesc = null
-        prevKeyframeKps  = null
-        prevOverlapPct   = 0f
+        prevKeyframeKps = null
+        prevMeasurement = OverlapMeasurement()
 
         if (keyframeMat == null) return
 
         val clone = keyframeMat.clone()
         val kps = MatOfKeyPoint()
         val desc = Mat()
-        orb.detectAndCompute(clone, Mat(), kps, desc)
+        val featureMask = Mat()
+        orb.detectAndCompute(clone, featureMask, kps, desc)
+        featureMask.release()
 
-        prevKeyframeMat  = clone
-        prevKeyframeKps  = kps
+        prevKeyframeMat = clone
+        prevKeyframeKps = kps
         prevKeyframeDesc = desc
     }
+
+    private fun median(values: List<Double>): Double {
+        if (values.isEmpty()) return 0.0
+        val sorted = values.sorted()
+        val middle = sorted.size / 2
+        return if (sorted.size % 2 == 0) {
+            (sorted[middle - 1] + sorted[middle]) / 2.0
+        } else {
+            sorted[middle]
+        }
+    }
+
+    private fun lerp(previous: Float, next: Float): Float = previous * 0.65f + next * 0.35f
 }

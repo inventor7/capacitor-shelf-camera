@@ -45,6 +45,11 @@ class KeyframeStore(private val context: Context) {
         sessionDir(sessionId).deleteRecursively()
     }
 
+    fun cleanupIntermediates(sessionId: String) {
+        File(sessionDir(sessionId), "frames").deleteRecursively()
+        File(sessionDir(sessionId), "preview.jpg").delete()
+    }
+
     fun sessionDir(sessionId: String): File =
         File(context.filesDir, "shelfcam/sessions/$sessionId")
 

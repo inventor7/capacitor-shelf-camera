@@ -41,13 +41,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import {
-  LucideX,
-  LucideCamera,
-  LucideCheck,
-  LucideSquare,
-  LucideShare2,
-} from 'lucide-vue-next';
+import { LucideX, LucideCamera, LucideCheck, LucideSquare, LucideShare2 } from 'lucide-vue-next';
 
 const props = defineProps<{
   state: 'capture' | 'stitching' | 'reviewing';
@@ -90,7 +84,7 @@ function handleSecondary() {
   z-index: 50;
   pointer-events: auto;
   padding-bottom: env(safe-area-inset-bottom, 20px);
-  background: linear-gradient(to top, rgba(0,0,0,0.6) 0%, transparent 100%);
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.6) 0%, transparent 100%);
 }
 
 /* ─── Secondary buttons ─── */
@@ -100,8 +94,9 @@ function handleSecondary() {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: transform var(--t-micro) var(--ease-spring),
-              background var(--t-micro);
+  transition:
+    transform var(--t-micro) var(--ease-spring),
+    background var(--t-micro);
 }
 .ctrl-btn:active {
   transform: scale(0.88);
@@ -111,13 +106,13 @@ function handleSecondary() {
   width: 48px;
   height: 48px;
   border-radius: 50%;
-  background: rgba(255,255,255,0.08);
+  background: rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   color: var(--text-0);
 }
 .ctrl-btn--secondary:active {
-  background: rgba(255,255,255,0.18);
+  background: rgba(255, 255, 255, 0.18);
 }
 
 /* ─── Main action button ─── */
@@ -130,8 +125,9 @@ function handleSecondary() {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: transform var(--t-micro) var(--ease-spring),
-              box-shadow var(--t-short);
+  transition:
+    transform var(--t-micro) var(--ease-spring),
+    box-shadow var(--t-short);
 }
 .ctrl-main:active {
   transform: scale(0.92);
@@ -142,18 +138,19 @@ function handleSecondary() {
 
 /* Capture: glass ring with camera icon */
 .ctrl-main--capture {
-  background: rgba(255,255,255,0.1);
+  background: rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  box-shadow: 0 0 0 3px rgba(255,255,255,0.3),
-              0 8px 24px rgba(0,0,0,0.3);
+  box-shadow:
+    0 0 0 3px rgba(255, 255, 255, 0.3),
+    0 8px 24px rgba(0, 0, 0, 0.3);
 }
 
 .sweep-ring {
   width: 60px;
   height: 60px;
   border-radius: 50%;
-  border: 3px solid rgba(255,255,255,0.6);
+  border: 3px solid rgba(255, 255, 255, 0.6);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -163,7 +160,7 @@ function handleSecondary() {
   width: 48px;
   height: 48px;
   border-radius: 50%;
-  background: rgba(255,255,255,0.1);
+  background: rgba(255, 255, 255, 0.1);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -172,7 +169,7 @@ function handleSecondary() {
 
 /* Stitching: spinner */
 .ctrl-main--stitching {
-  background: rgba(0,0,0,0.4);
+  background: rgba(0, 0, 0, 0.4);
   backdrop-filter: blur(16px);
 }
 
@@ -180,19 +177,21 @@ function handleSecondary() {
   width: 52px;
   height: 52px;
   border-radius: 50%;
-  border: 3px solid rgba(255,255,255,0.15);
+  border: 3px solid rgba(255, 255, 255, 0.15);
   border-top-color: var(--prism-5);
   border-right-color: var(--prism-1);
   animation: spin 0.8s linear infinite;
 }
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Reviewing: check button */
 .ctrl-main--reviewing {
   background: var(--ok);
-  box-shadow: 0 0 24px rgba(126,240,198,0.4);
+  box-shadow: 0 0 24px rgba(126, 240, 198, 0.4);
 }
 
 .check-icon {

@@ -3,6 +3,7 @@ import { WebPlugin } from '@capacitor/core';
 import type {
   KeyframeCell,
   PanoramaReadyEvent,
+  PreviewFrame,
   ShelfCameraPlugin,
 } from './definitions';
 
@@ -21,6 +22,10 @@ export class ShelfCameraWeb extends WebPlugin implements ShelfCameraPlugin {
 
   async setPreviewVisible(_opts: { visible: boolean }): Promise<void> {
     throw this.unimplemented('ShelfCamera.setPreviewVisible is not supported on web.');
+  }
+
+  async setPreviewFrame(_opts: PreviewFrame): Promise<void> {
+    throw this.unimplemented('ShelfCamera.setPreviewFrame is not supported on web.');
   }
 
   async beginPanorama(_opts: {
@@ -44,7 +49,10 @@ export class ShelfCameraWeb extends WebPlugin implements ShelfCameraPlugin {
     throw this.unimplemented('ShelfCamera.capturePhoto is not supported on web.');
   }
 
-  async commitPanorama(_opts: { sessionId: string }): Promise<PanoramaReadyEvent> {
+  async commitPanorama(_opts: {
+    sessionId: string;
+    manualDirection?: 'left' | 'right';
+  }): Promise<PanoramaReadyEvent> {
     throw this.unimplemented('ShelfCamera.commitPanorama is not supported on web.');
   }
 

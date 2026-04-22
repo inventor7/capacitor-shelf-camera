@@ -31,6 +31,7 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
     private var activeSession: PanoramaSession? = null
     private var tiltSensor: TiltSensor? = null
     private var thermalMonitor: ThermalMonitor? = null
+    private var isOpenCvReady = false
 
 
     private companion object {
@@ -61,11 +62,20 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
     }
 
     private fun doStart(call: PluginCall) {
+        if (!ensureOpenCvReady()) {
+            notifyListeners("error", JSObject().apply {
+                put("code", "DEVICE_UNSUPPORTED")
+                put("message", "OpenCV failed to initialize")
+            })
+            call.reject("OpenCV failed to initialize", "DEVICE_UNSUPPORTED")
+            return
+        }
+
         val resolution = call.getString("resolution", "1080p") ?: "1080p"
         val size = when (resolution) {
-            "720p" -> Size(1280, 720)
-            "2k"   -> Size(2560, 1440)
-            else   -> Size(1920, 1080)
+            "720p" -> Size(960, 720)
+            "2k"   -> Size(2048, 1536)
+            else   -> Size(1440, 1080)
         }
 
         val sensor = TiltSensor(context).also { it.start() }
@@ -87,6 +97,21 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
         controller.start(size, call)
     }
 
+    private fun ensureOpenCvReady(): Boolean {
+        if (isOpenCvReady) return true
+
+        return try {
+            isOpenCvReady = OpenCVLoader.initLocal()
+            if (!isOpenCvReady) {
+                Log.e(TAG, "OpenCV initLocal() returned false")
+            }
+            isOpenCvReady
+        } catch (error: Throwable) {
+            Log.e(TAG, "OpenCV initialization failed", error)
+            false
+        }
+    }
+
     @PluginMethod
     fun stop(call: PluginCall) {
         thermalMonitor?.stop()
@@ -103,6 +128,28 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
     fun setPreviewVisible(call: PluginCall) {
         val visible = call.getBoolean("visible", true) ?: true
         cameraController?.setPreviewVisible(visible)
+        call.resolve()
+    }
+
+    @PluginMethod
+    fun setPreviewFrame(call: PluginCall) {
+        val x = call.getDouble("x") ?: run {
+            call.reject("x is required")
+            return
+        }
+        val y = call.getDouble("y") ?: run {
+            call.reject("y is required")
+            return
+        }
+        val width = call.getDouble("width") ?: run {
+            call.reject("width is required")
+            return
+        }
+        val height = call.getDouble("height") ?: run {
+            call.reject("height is required")
+            return
+        }
+        cameraController?.setPreviewFrame(x, y, width, height)
         call.resolve()
     }
 
@@ -152,11 +199,12 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
             call.reject("sessionId is required")
             return
         }
+        val manualDirection = call.getString("manualDirection", "right") ?: "right"
         val session = activeSession?.takeIf { it.sessionId == sessionId } ?: run {
             call.reject("No active session: $sessionId")
             return
         }
-        session.commit(call) { event ->
+        session.commit(call, manualDirection) { event ->
             notifyListeners("panoramaReady", event)
         }
     }

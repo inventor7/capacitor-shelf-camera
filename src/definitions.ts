@@ -4,7 +4,13 @@ export type CoachingSignals = {
   blurScore: number;
   motionMagnitude: number;
   tiltDeg: number;
+  rollDeg: number;
+  levelOffsetX: number;
+  levelOffsetY: number;
   overlapPct: number;
+  horizontalShiftPct: number;
+  verticalShiftPct: number;
+  overlapConfidencePct: number;
   lumaMean: number;
   fps: number;
   timestamp: number;
@@ -45,6 +51,14 @@ export type PanoramaReadyEvent = {
   gridCols: number;
   durationMs: number;
   seamScore: number;
+  stitchMode?: 'feature' | 'canvas';
+};
+
+export type PreviewFrame = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 };
 
 export type ShelfCameraError = {
@@ -71,6 +85,8 @@ export interface ShelfCameraPlugin {
 
   setPreviewVisible(opts: { visible: boolean }): Promise<void>;
 
+  setPreviewFrame(opts: PreviewFrame): Promise<void>;
+
   beginPanorama(opts: {
     sessionId: string;
     mode: 'sweep' | 'singleShot' | 'manual';
@@ -88,7 +104,10 @@ export interface ShelfCameraPlugin {
     targetCell?: KeyframeCell;
   }): Promise<{ frameId: string; fullUri: string; thumbnailUri: string }>;
 
-  commitPanorama(opts: { sessionId: string }): Promise<PanoramaReadyEvent>;
+  commitPanorama(opts: {
+    sessionId: string;
+    manualDirection?: 'left' | 'right';
+  }): Promise<PanoramaReadyEvent>;
 
   cancelPanorama(opts: { sessionId: string }): Promise<void>;
 
