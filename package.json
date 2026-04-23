@@ -1,17 +1,15 @@
 {
   "name": "capacitor-shelf-camera",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Coached panoramic shelf capture plugin with CameraX, OpenCV stitching, and per-frame coaching signals",
   "main": "dist/plugin.cjs.js",
   "module": "dist/esm/index.js",
   "types": "dist/esm/index.d.ts",
   "unpkg": "dist/plugin.js",
   "files": [
-    "android/src/main/",
-    "android/build.gradle",
+    "android/",
     "dist/",
-    "ios/Sources",
-    "ios/Tests",
+    "ios/",
     "Package.swift",
     "CapacitorShelfCamera.podspec"
   ],
