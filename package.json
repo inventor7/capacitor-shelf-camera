@@ -1,6 +1,6 @@
 {
   "name": "capacitor-shelf-camera",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Coached panoramic shelf capture plugin with CameraX, OpenCV stitching, and per-frame coaching signals",
   "main": "dist/plugin.cjs.js",
   "module": "dist/esm/index.js",
