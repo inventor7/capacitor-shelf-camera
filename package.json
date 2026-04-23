@@ -7,9 +7,11 @@
   "types": "dist/esm/index.d.ts",
   "unpkg": "dist/plugin.js",
   "files": [
-    "android/",
+    "android/src/main/",
+    "android/build.gradle",
     "dist/",
-    "ios/",
+    "ios/Sources",
+    "ios/Tests",
     "Package.swift",
     "CapacitorShelfCamera.podspec"
   ],
