@@ -3,7 +3,6 @@ package com.efficy.shelfcamera
 import android.Manifest
 import android.util.Log
 import android.util.Size
-import com.efficy.shelfcamera.sensors.TiltSensor
 import com.efficy.shelfcamera.util.DeviceTier
 import com.efficy.shelfcamera.util.EventEmitter
 import com.efficy.shelfcamera.util.ThermalMonitor
@@ -29,7 +28,6 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
 
     private var cameraController: CameraController? = null
     private var activeSession: PanoramaSession? = null
-    private var tiltSensor: TiltSensor? = null
     private var thermalMonitor: ThermalMonitor? = null
     private var isOpenCvReady = false
 
@@ -78,9 +76,6 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
             else   -> Size(1440, 1080)
         }
 
-        val sensor = TiltSensor(context).also { it.start() }
-        tiltSensor = sensor
-
         val emitter = EventEmitter { name, data -> notifyListeners(name, data) }
 
         val monitor = ThermalMonitor(context) { throttled ->
@@ -92,7 +87,7 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
         monitor.start()
         thermalMonitor = monitor
 
-        val controller = CameraController(context, activity, emitter, sensor, bridge)
+        val controller = CameraController(context, activity, emitter, bridge)
         cameraController = controller
         controller.start(size, call)
     }
@@ -116,8 +111,6 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
     fun stop(call: PluginCall) {
         thermalMonitor?.stop()
         thermalMonitor = null
-        tiltSensor?.stop()
-        tiltSensor = null
         cameraController?.stop()
         cameraController = null
         activeSession = null
@@ -159,14 +152,15 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
             call.reject("sessionId is required")
             return
         }
-        val mode = call.getString("mode", "sweep") ?: "sweep"
-        val thresholds = call.getObject("keyframeThresholds")
+        val mode = call.getString("mode", "manual") ?: "manual"
+        if (mode != "manual") {
+            call.reject("Only manual panorama mode is supported.")
+            return
+        }
 
         val session = PanoramaSession(
             sessionId = sessionId,
-            mode = mode,
             expectedCells = call.getInt("expectedCells"),
-            thresholdsJson = thresholds,
             plugin = this,
             context = context,
         )
@@ -185,12 +179,7 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
             call.reject("No active panorama session")
             return
         }
-        if (session.mode == "manual") {
-            cameraController?.captureManualFrame(session, call)
-        } else {
-            val targetCell = call.getObject("targetCell")
-            cameraController?.captureStill(session, targetCell, call)
-        }
+        cameraController?.captureManualFrame(session, call)
     }
 
     @PluginMethod
@@ -199,12 +188,13 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
             call.reject("sessionId is required")
             return
         }
-        val manualDirection = call.getString("manualDirection", "right") ?: "right"
         val session = activeSession?.takeIf { it.sessionId == sessionId } ?: run {
             call.reject("No active session: $sessionId")
             return
         }
-        session.commit(call, manualDirection) { event ->
+        session.commit(call) { event ->
+            activeSession = null
+            cameraController?.setActiveSession(null)
             notifyListeners("panoramaReady", event)
         }
     }
@@ -265,7 +255,6 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
     override fun handleOnDestroy() {
         super.handleOnDestroy()
         thermalMonitor?.stop()
-        tiltSensor?.stop()
         activeSession?.let {
             it.cancel()
             notifyListeners("error", JSObject().apply {

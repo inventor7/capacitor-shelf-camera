@@ -1,26 +1,8 @@
 import type { PluginListenerHandle } from '@capacitor/core';
 
 export type CoachingSignals = {
-  blurScore: number;
-  motionMagnitude: number;
-  tiltDeg: number;
-  rollDeg: number;
-  levelOffsetX: number;
-  levelOffsetY: number;
   overlapPct: number;
-  horizontalShiftPct: number;
-  verticalShiftPct: number;
-  overlapConfidencePct: number;
-  lumaMean: number;
-  fps: number;
   timestamp: number;
-  /**
-   * When a panorama session is active and the most recent frame was NOT
-   * accepted as a keyframe, this describes why (e.g. "blur too low",
-   * "tilt too high", "waiting for stillness", "dwell (150ms / 300ms)").
-   * Undefined when a keyframe was just accepted or no session is active.
-   */
-  rejectionReason?: string;
 };
 
 export type KeyframeCell = { row: number; col: number };
@@ -77,8 +59,6 @@ export interface ShelfCameraPlugin {
   start(options: {
     resolution?: '720p' | '1080p' | '2k';
     coaching?: boolean;
-    /** Emits full frame signals at 30fps when true. */
-    diagnostic?: boolean;
   }): Promise<void>;
 
   stop(): Promise<void>;
@@ -89,24 +69,16 @@ export interface ShelfCameraPlugin {
 
   beginPanorama(opts: {
     sessionId: string;
-    mode: 'sweep' | 'singleShot' | 'manual';
+    mode?: 'manual';
     expectedCells?: number;
-    keyframeThresholds?: {
-      minBlur?: number;
-      maxMotion?: number;
-      maxTiltDeg?: number;
-      minOverlapPct?: number;
-    };
   }): Promise<void>;
 
   capturePhoto(opts: {
     sessionId: string;
-    targetCell?: KeyframeCell;
   }): Promise<{ frameId: string; fullUri: string; thumbnailUri: string }>;
 
   commitPanorama(opts: {
     sessionId: string;
-    manualDirection?: 'left' | 'right';
   }): Promise<PanoramaReadyEvent>;
 
   cancelPanorama(opts: { sessionId: string }): Promise<void>;

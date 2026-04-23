@@ -8,7 +8,15 @@ import org.opencv.core.Size
 
 class ManualFallbackStitcher {
 
-    fun stitch(frames: List<Mat>, direction: String, hints: List<ManualFrameHint>): StitchResult {
+    fun stitch(frames: List<Mat>, hints: List<ManualFrameHint>): StitchResult {
+        return stitch(frames, hints, allowCanvasDownscaleRetry = true)
+    }
+
+    private fun stitch(
+        frames: List<Mat>,
+        hints: List<ManualFrameHint>,
+        allowCanvasDownscaleRetry: Boolean,
+    ): StitchResult {
         if (frames.isEmpty()) {
             return StitchResult(false, null, 0f, "No frames were provided for stitching.")
         }
@@ -20,13 +28,18 @@ class ManualFallbackStitcher {
         var cursorX = 0.0
         var cursorY = 0.0
         positions.add(cursorX to cursorY)
+        val fallbackSweepDirection = inferSweepDirection(hints)
 
         for (index in 1 until frames.size) {
             val hint = hints.getOrNull(index) ?: ManualFrameHint()
-            val stepX = horizontalStepPx(frames[index], hint.horizontalShiftPct)
+            val stepX = horizontalStepPx(
+                frames[index],
+                hint.horizontalShiftPct,
+                fallbackSweepDirection,
+            )
             val stepY = verticalStepPx(frames[index], hint.verticalShiftPct)
 
-            cursorX += if (direction == "left") -stepX else stepX
+            cursorX += stepX
             cursorY += stepY
             positions.add(cursorX to cursorY)
         }
@@ -39,7 +52,22 @@ class ManualFallbackStitcher {
         val canvasH = ceil(maxY - minY).toInt().coerceAtLeast(1)
         val canvasArea = canvasW.toLong() * canvasH.toLong()
 
-        if (canvasArea > MAX_CANVAS_AREA_PX) {
+        if (canvasArea > StitchCanvasLimiter.maxCanvasAreaPx) {
+            if (allowCanvasDownscaleRetry) {
+                val retryScale = StitchCanvasLimiter.scaleForArea(canvasArea)
+                if (retryScale < 0.999) {
+                    val scaledFrames = StitchCanvasLimiter.downscale(frames, retryScale)
+                    try {
+                        return stitch(
+                            scaledFrames,
+                            hints,
+                            allowCanvasDownscaleRetry = false,
+                        )
+                    } finally {
+                        StitchCanvasLimiter.release(scaledFrames)
+                    }
+                }
+            }
             return StitchResult(false, null, 0f, "The stitched panorama would be too large to render.")
         }
 
@@ -61,14 +89,32 @@ class ManualFallbackStitcher {
         )
     }
 
-    private fun horizontalStepPx(frame: Mat, shiftPct: Float): Double {
-        val ratio =
-            if (abs(shiftPct) < 1f) {
-                DEFAULT_STEP_RATIO
-            } else {
-                (abs(shiftPct.toDouble()) / 100.0).coerceIn(MIN_STEP_RATIO, MAX_STEP_RATIO)
-            }
-        return frame.cols() * ratio
+    private fun horizontalStepPx(frame: Mat, shiftPct: Float, fallbackSweepDirection: Double): Double {
+        if (abs(shiftPct) < 1f) {
+            return frame.cols() * DEFAULT_STEP_RATIO * fallbackSweepDirection
+        }
+
+        val ratio = (abs(shiftPct.toDouble()) / 100.0).coerceIn(MIN_STEP_RATIO, MAX_STEP_RATIO)
+        val direction = if (shiftPct <= 0f) 1.0 else -1.0
+        return frame.cols() * ratio * direction
+    }
+
+    private fun inferSweepDirection(hints: List<ManualFrameHint>): Double {
+        val signedDirections =
+            hints
+                .drop(1)
+                .mapNotNull { hint ->
+                    if (abs(hint.horizontalShiftPct) < 1f) {
+                        null
+                    } else if (hint.horizontalShiftPct <= 0f) {
+                        1.0
+                    } else {
+                        -1.0
+                    }
+                }
+
+        val directionScore = signedDirections.sum()
+        return if (directionScore < 0.0) -1.0 else 1.0
     }
 
     private fun verticalStepPx(frame: Mat, shiftPct: Float): Double {
@@ -112,6 +158,5 @@ class ManualFallbackStitcher {
         private const val MIN_STEP_RATIO = 0.28
         private const val MAX_STEP_RATIO = 0.82
         private const val MAX_VERTICAL_RATIO = 0.18
-        private const val MAX_CANVAS_AREA_PX = 16L * 1_000L * 1_000L
     }
 }

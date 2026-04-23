@@ -12,7 +12,6 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.efficy.shelfcamera.analyzers.FrameAnalyzer
 import com.efficy.shelfcamera.keyframe.KeyframeStore
-import com.efficy.shelfcamera.sensors.TiltSensor
 import com.efficy.shelfcamera.stitch.ManualFrameHint
 import com.efficy.shelfcamera.util.EventEmitter
 import com.getcapacitor.Bridge
@@ -30,7 +29,6 @@ class CameraController(
         private val context: Context,
         private val activity: FragmentActivity,
         private val emitter: EventEmitter,
-        private val tiltSensor: TiltSensor,
         private val bridge: Bridge,
 ) {
     private data class PreviewFrameSpec(
@@ -81,8 +79,7 @@ class CameraController(
                                         it.setSurfaceProvider(previewView!!.surfaceProvider)
                                     }
 
-                            val analyzer = FrameAnalyzer(emitter, keyframeStore, stitchExecutor)
-                            analyzer.setTiltSensor(tiltSensor)
+                            val analyzer = FrameAnalyzer(emitter)
                             frameAnalyzer = analyzer
 
                             analysisUseCase =
@@ -201,6 +198,7 @@ class CameraController(
                             rgbaMat.release()
 
                             val signals = frameAnalyzer?.latestSignalSnapshot()
+                            val overlapMeasurement = frameAnalyzer?.latestOverlapMeasurement()
                             val col = session.acceptedFrames.size
                             val saved = keyframeStore.save(session.sessionId, bgrMat)
                             session.frameMats.add(bgrMat.clone())
@@ -211,29 +209,21 @@ class CameraController(
                                     } else {
                                         ManualFrameHint(
                                                 horizontalShiftPct =
-                                                        signals?.horizontalShiftPct ?: 0f,
+                                                        overlapMeasurement?.horizontalShiftPct
+                                                                ?: 0f,
                                                 verticalShiftPct =
-                                                        signals?.verticalShiftPct ?: 0f,
+                                                        overlapMeasurement?.verticalShiftPct ?: 0f,
                                         )
                                     }
                             )
                             frameAnalyzer?.notifyManualCapture(bgrMat)
                             bgrMat.release()
 
-                            val blurScore = 0f
-                            val motionMagnitude = 0f
-                            val tiltDeg = signals?.tiltDeg ?: 0f
-                            val rollDeg = signals?.rollDeg ?: 0f
-                            val levelOffsetX = signals?.levelOffsetX ?: 0f
-                            val levelOffsetY = signals?.levelOffsetY ?: 0f
                             val overlapPct = signals?.overlapPct ?: 0f
-                            val horizontalShiftPct = signals?.horizontalShiftPct ?: 0f
-                            val verticalShiftPct = signals?.verticalShiftPct ?: 0f
-                            val overlapConfidencePct = signals?.overlapConfidencePct ?: 0f
-                            val lumaMean = 0f
-                            val fps = signals?.fps ?: 0f
                             val timestamp = signals?.timestamp ?: System.currentTimeMillis()
-                            val qualityScore = 1f
+                            val qualityScore =
+                                    ((overlapMeasurement?.confidencePct ?: 0f) / 100f)
+                                            .coerceIn(0.2f, 1f)
 
                             emitter.emit(
                                     "keyframeAccepted",
@@ -252,27 +242,7 @@ class CameraController(
                                         put(
                                                 "signals",
                                                 JSObject().apply {
-                                                    put("blurScore", blurScore.toDouble())
-                                                    put("motionMagnitude", motionMagnitude.toDouble())
-                                                    put("tiltDeg", tiltDeg.toDouble())
-                                                    put("rollDeg", rollDeg.toDouble())
-                                                    put("levelOffsetX", levelOffsetX.toDouble())
-                                                    put("levelOffsetY", levelOffsetY.toDouble())
                                                     put("overlapPct", overlapPct.toDouble())
-                                                    put(
-                                                            "horizontalShiftPct",
-                                                            horizontalShiftPct.toDouble()
-                                                    )
-                                                    put(
-                                                            "verticalShiftPct",
-                                                            verticalShiftPct.toDouble()
-                                                    )
-                                                    put(
-                                                            "overlapConfidencePct",
-                                                            overlapConfidencePct.toDouble()
-                                                    )
-                                                    put("lumaMean", lumaMean.toDouble())
-                                                    put("fps", fps.toDouble())
                                                     put("timestamp", timestamp)
                                                 }
                                         )
@@ -284,7 +254,8 @@ class CameraController(
                                     try {
                                         val result =
                                                 session.stitchEngine.stitchIncrementalManual(
-                                                        session.frameMats
+                                                        session.frameMats,
+                                                        session.manualFrameHints,
                                                 )
                                         if (result.success && result.panorama != null) {
                                             val previewFile =
@@ -341,54 +312,6 @@ class CameraController(
                             )
                         } catch (e: Exception) {
                             call.reject("Manual capture failed: ${e.message}", "IO_ERROR")
-                        }
-                    }
-
-                    override fun onError(exception: ImageCaptureException) {
-                        call.reject("Capture failed: ${exception.message}", "IO_ERROR")
-                    }
-                }
-        )
-    }
-
-    /**
-     * Capture a full-resolution still for a repair frame or manual keyframe. Converts YUV → BGR
-     * Mat, saves via [KeyframeStore], and resolves call with URIs.
-     */
-    fun captureStill(session: PanoramaSession, targetCell: JSObject?, call: PluginCall) {
-        val capture =
-                imageCapture
-                        ?: run {
-                            call.reject("Camera not started")
-                            return
-                        }
-        capture.takePicture(
-                ContextCompat.getMainExecutor(context),
-                object : ImageCapture.OnImageCapturedCallback() {
-                    override fun onCaptureSuccess(image: ImageProxy) {
-                        try {
-                            val bitmap = image.toBitmap()
-                            image.close()
-
-                            val rgbaMat = Mat()
-                            org.opencv.android.Utils.bitmapToMat(bitmap, rgbaMat)
-                            val bgrMat = Mat()
-                            Imgproc.cvtColor(rgbaMat, bgrMat, Imgproc.COLOR_RGBA2BGR)
-                            rgbaMat.release()
-
-                            val saved = keyframeStore.save(session.sessionId, bgrMat)
-                            session.addRepairFrame(saved, targetCell)
-                            bgrMat.release()
-
-                            call.resolve(
-                                    JSObject().apply {
-                                        put("frameId", saved.frameId)
-                                        put("fullUri", saved.fullUri)
-                                        put("thumbnailUri", saved.thumbnailUri)
-                                    }
-                            )
-                        } catch (e: Exception) {
-                            call.reject("Capture save failed: ${e.message}", "IO_ERROR")
                         }
                     }
 

@@ -86,12 +86,11 @@ class StitchEngine {
             Log.i(TAG, "stitchAll: single frame, returning as-is")
             return StitchResult(true, frames[0].clone(), 1f)
         }
-        return runStitch(frames, "FULL", defaultProfile)
+        return runStitch(frames, "FULL", defaultProfile, allowCanvasDownscaleRetry = true)
     }
 
     fun stitchAllManual(
         frames: List<Mat>,
-        direction: String = "right",
         hints: List<ManualFrameHint> = emptyList(),
     ): StitchResult {
         if (frames.isEmpty()) {
@@ -102,11 +101,17 @@ class StitchEngine {
             Log.i(TAG, "stitchAllManual: single frame, returning as-is")
             return StitchResult(true, frames[0].clone(), 1f)
         }
-        val featureResult = runStitch(frames, "FULL-MANUAL", manualProfile)
+        val featureResult = runStitch(
+            frames,
+            "FULL-MANUAL",
+            manualProfile,
+            allowCanvasDownscaleRetry = true,
+            manualHints = hints,
+        )
         if (featureResult.success) {
             return featureResult
         }
-        return manualFallbackStitcher.stitch(frames, direction, hints)
+        return manualFallbackStitcher.stitch(frames, hints)
     }
 
     /**
@@ -119,10 +124,19 @@ class StitchEngine {
         return runStitch(window, "INCR", defaultProfile)
     }
 
-    fun stitchIncrementalManual(frames: List<Mat>): StitchResult {
+    fun stitchIncrementalManual(
+        frames: List<Mat>,
+        hints: List<ManualFrameHint> = emptyList(),
+    ): StitchResult {
         if (frames.size < 2) return StitchResult(false, null, 0f, "At least two frames are required.")
         val window = frames.takeLast(slidingWindowSize)
-        return runStitch(window, "INCR-MANUAL", manualProfile)
+        val hintWindow = hints.takeLast(window.size)
+        return runStitch(
+            window,
+            "INCR-MANUAL",
+            manualProfile,
+            manualHints = hintWindow,
+        )
     }
 
     /** Replace the frame at [indexToReplace] and re-run [stitchAll]. */
@@ -303,7 +317,13 @@ class StitchEngine {
     // Core pipeline
     // ------------------------------------------------------------------------
 
-    private fun runStitch(frames: List<Mat>, label: String, profile: StitchProfile): StitchResult {
+    private fun runStitch(
+        frames: List<Mat>,
+        label: String,
+        profile: StitchProfile,
+        allowCanvasDownscaleRetry: Boolean = false,
+        manualHints: List<ManualFrameHint> = emptyList(),
+    ): StitchResult {
         val startMs = System.currentTimeMillis()
         val features = mutableListOf<Features?>()
         val cumulativeH = mutableListOf<Mat>() // cumulativeH[i]: frame[i] pts → frame[0] pts
@@ -334,7 +354,15 @@ class StitchEngine {
                         label,
                         pairLabel,
                     )
-                val pairH = pairResult.transform ?: run {
+                val pairH =
+                    pairResult.transform ?: buildHintTranslationFallback(
+                        frame = frames[i],
+                        hint = manualHints.getOrNull(i),
+                        profile = profile,
+                        label = label,
+                        pairLabel = pairLabel,
+                        featureFailureReason = pairResult.failureReason,
+                    ) ?: run {
                     Log.w(TAG, "[$label] $pairLabel: transform failed")
                     return StitchResult(
                         false,
@@ -376,8 +404,26 @@ class StitchEngine {
             val canvasW = kotlin.math.ceil(maxX - minX).toInt().coerceAtLeast(1)
             val canvasH = kotlin.math.ceil(maxY - minY).toInt().coerceAtLeast(1)
             val canvasArea = canvasW.toLong() * canvasH.toLong()
-            if (canvasArea > MAX_CANVAS_AREA_PX) {
+            if (canvasArea > StitchCanvasLimiter.maxCanvasAreaPx) {
                 Log.w(TAG, "[$label] canvas too large: ${canvasW}x${canvasH} (area=$canvasArea)")
+                if (allowCanvasDownscaleRetry) {
+                    val retryScale = StitchCanvasLimiter.scaleForArea(canvasArea)
+                    if (retryScale < 0.999) {
+                        Log.i(TAG, "[$label] retrying with downscale=${"%.3f".format(retryScale)}")
+                        val scaledFrames = StitchCanvasLimiter.downscale(frames, retryScale)
+                        try {
+                            return runStitch(
+                                scaledFrames,
+                                "$label-DOWNSCALED",
+                                profile,
+                                allowCanvasDownscaleRetry = false,
+                                manualHints = manualHints,
+                            )
+                        } finally {
+                            StitchCanvasLimiter.release(scaledFrames)
+                        }
+                    }
+                }
                 return StitchResult(false, null, 0f, "The stitched panorama would be too large to render.")
             }
 
@@ -446,6 +492,40 @@ class StitchEngine {
             features.forEach { it?.release() }
             cumulativeH.forEach { it.release() }
         }
+    }
+
+    private fun buildHintTranslationFallback(
+        frame: Mat,
+        hint: ManualFrameHint?,
+        profile: StitchProfile,
+        label: String,
+        pairLabel: String,
+        featureFailureReason: String?,
+    ): Mat? {
+        if (!profile.allowTranslationFallback || hint == null) {
+            return null
+        }
+
+        val hasHorizontalSignal = kotlin.math.abs(hint.horizontalShiftPct) >= MIN_HINT_SHIFT_PCT
+        val hasVerticalSignal = kotlin.math.abs(hint.verticalShiftPct) >= MIN_HINT_VERTICAL_SHIFT_PCT
+        if (!hasHorizontalSignal && !hasVerticalSignal) {
+            return null
+        }
+
+        val dx = -(hint.horizontalShiftPct.toDouble() / 100.0) * frame.width().toDouble()
+        val dy = -(hint.verticalShiftPct.toDouble() / 100.0) * frame.height().toDouble()
+        val translation = Mat.eye(3, 3, CvType.CV_64F).apply {
+            put(0, 2, dx)
+            put(1, 2, dy)
+        }
+
+        Log.i(
+            TAG,
+            "[$label] $pairLabel: using hint fallback " +
+                "(dx=${"%.1f".format(dx)}, dy=${"%.1f".format(dy)}, " +
+                "reason=${featureFailureReason ?: "unknown"})",
+        )
+        return translation
     }
 
     private fun buildTranslationFallback(
@@ -600,8 +680,7 @@ class StitchEngine {
         private const val MANUAL_MAX_PAIR_WIDTH_MULTIPLIER = 3.0
         private const val MANUAL_MAX_PAIR_HEIGHT_MULTIPLIER = 2.5
         private const val MANUAL_MAX_PAIR_AREA_MULTIPLIER = 4.5
-
-        /** ~16 MP of canvas (e.g. 4000×4000 or 5300×3000) — stops runaway 360° sweeps. */
-        private const val MAX_CANVAS_AREA_PX = 16L * 1_000L * 1_000L
+        private const val MIN_HINT_SHIFT_PCT = 1f
+        private const val MIN_HINT_VERTICAL_SHIFT_PCT = 0.5f
     }
 }
