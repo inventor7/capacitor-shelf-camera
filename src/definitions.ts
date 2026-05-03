@@ -43,6 +43,13 @@ export type PreviewFrame = {
   height: number;
 };
 
+export type CaptureCropRegion = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
 export type ShelfCameraError = {
   code:
     | 'PERMISSION_DENIED'
@@ -67,6 +74,10 @@ export interface ShelfCameraPlugin {
 
   setPreviewFrame(opts: PreviewFrame): Promise<void>;
 
+  setCaptureCropRegion(
+    opts: CaptureCropRegion | { enabled: false },
+  ): Promise<void>;
+
   beginPanorama(opts: {
     sessionId: string;
     mode?: 'manual';
@@ -82,6 +93,8 @@ export interface ShelfCameraPlugin {
   }): Promise<PanoramaReadyEvent>;
 
   cancelPanorama(opts: { sessionId: string }): Promise<void>;
+
+  deletePanoramaSession(opts: { sessionId: string }): Promise<void>;
 
   pausePanorama(opts: { sessionId: string }): Promise<void>;
 

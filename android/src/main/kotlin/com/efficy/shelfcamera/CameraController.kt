@@ -19,7 +19,9 @@ import com.getcapacitor.JSObject
 import com.getcapacitor.PluginCall
 import java.util.concurrent.Executors
 import org.opencv.core.Mat
+import org.opencv.core.Rect
 import org.opencv.imgproc.Imgproc
+import kotlin.math.roundToInt
 
 /**
  * Owns the CameraX lifecycle: binds Preview + ImageAnalysis + ImageCapture use-cases and routes
@@ -38,6 +40,13 @@ class CameraController(
             val heightPx: Int,
     )
 
+    private data class CaptureCropRegion(
+            val x: Double,
+            val y: Double,
+            val width: Double,
+            val height: Double,
+    )
+
     private val analyzerExecutor = Executors.newSingleThreadExecutor()
     private val stitchExecutor = Executors.newSingleThreadExecutor()
     private var previewUseCase: Preview? = null
@@ -47,6 +56,7 @@ class CameraController(
     private var previewView: PreviewView? = null
     private var frameAnalyzer: FrameAnalyzer? = null
     private var previewFrameSpec: PreviewFrameSpec? = null
+    private var captureCropRegion: CaptureCropRegion? = null
     private val keyframeStore = KeyframeStore(context)
 
     fun start(resolution: Size, call: PluginCall) {
@@ -153,6 +163,23 @@ class CameraController(
         activity.runOnUiThread { applyPreviewFrame() }
     }
 
+    fun setCaptureCropRegion(x: Double, y: Double, width: Double, height: Double) {
+        val safeX = x.coerceIn(0.0, 1.0)
+        val safeY = y.coerceIn(0.0, 1.0)
+        val safeWidth = width.coerceIn(0.0, 1.0 - safeX)
+        val safeHeight = height.coerceIn(0.0, 1.0 - safeY)
+        captureCropRegion =
+                if (safeWidth > 0.0 && safeHeight > 0.0) {
+                    CaptureCropRegion(safeX, safeY, safeWidth, safeHeight)
+                } else {
+                    null
+                }
+    }
+
+    fun clearCaptureCropRegion() {
+        captureCropRegion = null
+    }
+
     fun setActiveSession(session: PanoramaSession?) {
         frameAnalyzer?.setSession(session)
     }
@@ -176,6 +203,29 @@ class CameraController(
         view.visibility = View.VISIBLE
     }
 
+    private fun cropCaptureMat(source: Mat): Mat {
+        val region = captureCropRegion ?: return source.clone()
+        val sourceWidth = source.cols()
+        val sourceHeight = source.rows()
+        if (sourceWidth <= 1 || sourceHeight <= 1) return source.clone()
+
+        val left = (sourceWidth * region.x).roundToInt().coerceIn(0, sourceWidth - 1)
+        val top = (sourceHeight * region.y).roundToInt().coerceIn(0, sourceHeight - 1)
+        val right =
+                (sourceWidth * (region.x + region.width))
+                        .roundToInt()
+                        .coerceIn(left + 1, sourceWidth)
+        val bottom =
+                (sourceHeight * (region.y + region.height))
+                        .roundToInt()
+                        .coerceIn(top + 1, sourceHeight)
+
+        val croppedView = source.submat(Rect(left, top, right - left, bottom - top))
+        val cropped = croppedView.clone()
+        croppedView.release()
+        return cropped
+    }
+
     fun captureManualFrame(session: PanoramaSession, call: PluginCall) {
         val capture =
                 imageCapture
@@ -196,12 +246,14 @@ class CameraController(
                             val bgrMat = Mat()
                             Imgproc.cvtColor(rgbaMat, bgrMat, Imgproc.COLOR_RGBA2BGR)
                             rgbaMat.release()
+                            val captureMat = cropCaptureMat(bgrMat)
+                            bgrMat.release()
 
                             val signals = frameAnalyzer?.latestSignalSnapshot()
                             val overlapMeasurement = frameAnalyzer?.latestOverlapMeasurement()
                             val col = session.acceptedFrames.size
-                            val saved = keyframeStore.save(session.sessionId, bgrMat)
-                            session.frameMats.add(bgrMat.clone())
+                            val saved = keyframeStore.save(session.sessionId, captureMat)
+                            session.frameMats.add(captureMat.clone())
                             session.acceptedFrames.add(saved)
                             session.manualFrameHints.add(
                                     if (col == 0) {
@@ -216,8 +268,8 @@ class CameraController(
                                         )
                                     }
                             )
-                            frameAnalyzer?.notifyManualCapture(bgrMat)
-                            bgrMat.release()
+                            frameAnalyzer?.notifyManualCapture(captureMat)
+                            captureMat.release()
 
                             val overlapPct = signals?.overlapPct ?: 0f
                             val timestamp = signals?.timestamp ?: System.currentTimeMillis()

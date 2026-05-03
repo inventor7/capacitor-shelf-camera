@@ -2,6 +2,7 @@ import { WebPlugin } from '@capacitor/core';
 
 import type {
   PanoramaReadyEvent,
+  CaptureCropRegion,
   PreviewFrame,
   ShelfCameraPlugin,
 } from './definitions';
@@ -26,6 +27,14 @@ export class ShelfCameraWeb extends WebPlugin implements ShelfCameraPlugin {
     throw this.unimplemented('ShelfCamera.setPreviewFrame is not supported on web.');
   }
 
+  async setCaptureCropRegion(
+    _opts: CaptureCropRegion | { enabled: false },
+  ): Promise<void> {
+    throw this.unimplemented(
+      'ShelfCamera.setCaptureCropRegion is not supported on web.',
+    );
+  }
+
   async beginPanorama(_opts: {
     sessionId: string;
     mode?: 'manual';
@@ -48,6 +57,10 @@ export class ShelfCameraWeb extends WebPlugin implements ShelfCameraPlugin {
 
   async cancelPanorama(_opts: { sessionId: string }): Promise<void> {
     throw this.unimplemented('ShelfCamera.cancelPanorama is not supported on web.');
+  }
+
+  async deletePanoramaSession(_opts: { sessionId: string }): Promise<void> {
+    throw this.unimplemented('ShelfCamera.deletePanoramaSession is not supported on web.');
   }
 
   async pausePanorama(_opts: { sessionId: string }): Promise<void> {

@@ -3,6 +3,7 @@ package com.efficy.shelfcamera
 import android.Manifest
 import android.util.Log
 import android.util.Size
+import com.efficy.shelfcamera.keyframe.KeyframeStore
 import com.efficy.shelfcamera.util.DeviceTier
 import com.efficy.shelfcamera.util.EventEmitter
 import com.efficy.shelfcamera.util.ThermalMonitor
@@ -111,6 +112,7 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
     fun stop(call: PluginCall) {
         thermalMonitor?.stop()
         thermalMonitor = null
+        activeSession?.cancel()
         cameraController?.stop()
         cameraController = null
         activeSession = null
@@ -143,6 +145,34 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
             return
         }
         cameraController?.setPreviewFrame(x, y, width, height)
+        call.resolve()
+    }
+
+    @PluginMethod
+    fun setCaptureCropRegion(call: PluginCall) {
+        if (call.getBoolean("enabled", true) == false) {
+            cameraController?.clearCaptureCropRegion()
+            call.resolve()
+            return
+        }
+
+        val x = call.getDouble("x") ?: run {
+            call.reject("x is required")
+            return
+        }
+        val y = call.getDouble("y") ?: run {
+            call.reject("y is required")
+            return
+        }
+        val width = call.getDouble("width") ?: run {
+            call.reject("width is required")
+            return
+        }
+        val height = call.getDouble("height") ?: run {
+            call.reject("height is required")
+            return
+        }
+        cameraController?.setCaptureCropRegion(x, y, width, height)
         call.resolve()
     }
 
@@ -215,6 +245,23 @@ class ShelfCameraPlugin : com.getcapacitor.Plugin() {
         }
         activeSession = null
         cameraController?.setActiveSession(null)
+        call.resolve()
+    }
+
+    @PluginMethod
+    fun deletePanoramaSession(call: PluginCall) {
+        val sessionId = call.getString("sessionId") ?: run {
+            call.reject("sessionId is required")
+            return
+        }
+        val session = activeSession?.takeIf { it.sessionId == sessionId }
+        if (session != null) {
+            session.cancel()
+            activeSession = null
+            cameraController?.setActiveSession(null)
+        } else {
+            KeyframeStore(context).deleteSession(sessionId)
+        }
         call.resolve()
     }
 

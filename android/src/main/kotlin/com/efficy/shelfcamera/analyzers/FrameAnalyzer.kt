@@ -27,7 +27,7 @@ class FrameAnalyzer(
     private var session: PanoramaSession? = null
 
     private var lastEmitMs = 0L
-    private var emitIntervalMs = 160L
+    private var emitIntervalMs = 90L
     private var latestSignals: FrameSignalSnapshot? = null
     private var latestOverlapMeasurement = OverlapMeasurement()
 
@@ -37,7 +37,7 @@ class FrameAnalyzer(
     }
 
     fun setThrottled(throttled: Boolean) {
-        emitIntervalMs = if (throttled) 240L else 160L
+        emitIntervalMs = if (throttled) 160L else 90L
     }
 
     fun notifyManualCapture(frameMat: Mat) {
