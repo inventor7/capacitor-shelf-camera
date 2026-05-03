@@ -21,8 +21,12 @@ fun ImageProxy.toYuvMat(): Mat? {
     val row = ByteArray(rowStride)
 
     for (r in 0 until h) {
-        buffer.position(r * rowStride)
-        buffer.get(row, 0, rowStride)
+        val pos = r * rowStride
+        if (pos >= buffer.limit()) break
+        buffer.position(pos)
+        val toRead = minOf(rowStride, buffer.remaining())
+        buffer.get(row, 0, toRead)
+        if (toRead < rowStride) row.fill(0, toRead, rowStride)
         val data = if (pixelStride == 1) {
             row.copyOf(w)
         } else {
